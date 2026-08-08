@@ -58,16 +58,23 @@ Pick the pitch that fits how you work:
   snapshot ([see below](#no-lock-in)).
 
 > [!NOTE]
-> jog is v0 and under active daily dogfood. The snapshot engine's behavior is
-> lab-verified against git 2.50; every verified fact ships as a test.
+> jog is 0.x and under active daily dogfood. The snapshot engine's behavior
+> is lab-verified against git 2.50; every verified fact ships as a test.
 
 ## Install
 
-**1. Install the binary** (Go 1.26+; brew tap planned for v1):
+**1. Install the binary:**
 
 ```sh
+# Homebrew (macOS / Linux)
+brew install tyler-johnson/tap/jog
+
+# or with Go 1.26+
 go install github.com/tyler-johnson/jog/cmd/jog@latest
 ```
+
+Prebuilt binaries for linux/darwin (amd64/arm64) are on the
+[releases page](https://github.com/tyler-johnson/jog/releases).
 
 **2. Add the alias** — this is how you "remember" to snapshot: you don't.
 Muscle memory is the trigger; the compulsive `git status` tic becomes the
@@ -166,9 +173,27 @@ Every restore snapshots first, so undo is itself undoable.
 **What did I actually change in the last hour?**
 
 ```console
+$ jog since 1h           # per-file summary since the snapshot nearest 1h ago
 $ jog snaps -p           # full patches, in your pager
 $ jog snaps src/parser/  # just one path's history
 ```
+
+**Find the version of one file where it still worked**, scrubbing visually:
+
+```console
+$ jog pick src/parser/lexer.go
+```
+
+**The timeline is getting long.** Apply the retention taper — everything
+kept ≤ 24 h, hourly ≤ 7 d, daily ≤ 90 d:
+
+```console
+$ jog trim --dry-run     # the plan, touching nothing
+$ jog trim               # apply; the pre-trim tip stays at refs/jog/@trash/<branch>
+```
+
+Trim is the only jog command that discards snapshots, it never runs on its
+own, and its last pre-trim state survives until the trim after next.
 
 ## What jog will never touch
 
@@ -250,11 +275,13 @@ Native `git config` keys — global or per-repo, no new file format:
 
 ## Roadmap
 
-- **v1:** `since` (what changed vs N ago), `pick` (interactive TUI scrubber),
-  `trim` + tapering retention (hourly ≤ 7d, daily ≤ 90d), `doctor`, brew tap.
-- **v2:** MCP server (agents query their own snapshot history), optional
-  encrypted backup push of `refs/jog/*` to a private remote, shell prompt
-  segment.
+- **shipped:** snapshot engine, `snaps` (+ `--all` forest view), `since`,
+  `back`, `pick`, `trim` + tapering retention, `doctor`, Claude Code hooks,
+  brew tap.
+- **next:** automatic trim (piggybacked, at most daily — after the manual
+  command has earned trust), MCP server (agents query their own snapshot
+  history), optional encrypted backup push of `refs/jog/*` to a private
+  remote, shell prompt segment.
 
 ## License
 
