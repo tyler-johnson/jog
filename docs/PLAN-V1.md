@@ -285,10 +285,11 @@ repos (all snapshots inside keep-all; correctly nothing to drop).
   restore for one path (or `--all` chains), nothing else in v1. Every
   richer TUI idea (tree view, multi-select restore, graph) waits for a
   dogfood-backed reason.
-- **D21 — versioning starts at `v0.1.0`, not `v1.0.0`.** The "v0/v1" in
-  these plans are milestone eras, not semver. Public semver stays 0.x until
-  trim has months of dogfood — the deletion feature is the maturity
-  gate for 1.0.
+- **D21 — versioning starts at `v1.0.0`** *(amended 2026-08-08 — Tyler's
+  call, superseding the original 0.x plan)*: the v1 feature set ships as
+  1.0.0; the milestone eras and semver line up. The original caution (trim
+  is young) is carried by D19's manual-only rule and the insurance ref
+  instead of a 0.x version number.
 
 ## 5. Test matrix additions
 

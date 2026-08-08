@@ -58,8 +58,8 @@ Pick the pitch that fits how you work:
   snapshot ([see below](#no-lock-in)).
 
 > [!NOTE]
-> jog is 0.x and under active daily dogfood. The snapshot engine's behavior
-> is lab-verified against git 2.50; every verified fact ships as a test.
+> jog is under active daily dogfood. The snapshot engine's behavior is
+> lab-verified against git 2.50; every verified fact ships as a test.
 
 ## Install
 
