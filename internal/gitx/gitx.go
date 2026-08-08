@@ -92,6 +92,26 @@ func (r *Repo) RunRead(args ...string) (string, error) {
 	return r.Run(append([]string{"--no-optional-locks"}, args...)...)
 }
 
+// RunReadLoud is RunRead with git's stderr passed through to the user — for
+// commands whose warnings matter even on success (e.g. the reflog time-query
+// falling back to the oldest entry, which git reports on stderr with exit 0).
+func (r *Repo) RunReadLoud(args ...string) (string, error) {
+	cmd := exec.Command("git", append([]string{"--no-optional-locks"}, args...)...)
+	cmd.Dir = r.WorkDir
+	cmd.Env = append(os.Environ(), r.extraEnv...)
+	var stdout bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		code := -1
+		if cmd.ProcessState != nil {
+			code = cmd.ProcessState.ExitCode()
+		}
+		return "", &GitError{Args: args, ExitCode: code, cause: err}
+	}
+	return strings.TrimSpace(stdout.String()), nil
+}
+
 // StartRead starts a read command and returns its stdout for streaming, for
 // walks that terminate early (e.g. the snaps chain-boundary scan) — the
 // caller reads what it needs, then kills and waits on the returned cmd.

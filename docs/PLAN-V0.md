@@ -153,22 +153,26 @@ Milestones are sequential; each lands with its tests. Dogfood begins at M4.
       chain, so the loud "no snapshots yet" state signals a dead engine, not
       an unused one)
 
-### M6 — `jog back` (M)
+### M6 — `jog back` (M) — ✅ done
 
-- [ ] Resolve `--at T`: snap id (short sha) or git reflog time syntax against
+- [x] Resolve `--at T`: snap id (short sha) or git reflog time syntax against
       `refs/jog/<branch>@{…}`; default = newest snapshot. Past-oldest time
-      queries warn + use oldest, exit 0 (verified git behavior, keep it).
-- [ ] **Restore is itself snapshotted first** (`pre: jog back …`) — undo is
-      undoable
-- [ ] Single file: `git restore --source=<snap> --worktree -- <path>`
+      queries warn (git's stderr passed through) + use oldest, exit 0.
+      **Ordering:** target resolves *before* the pre-restore snapshot, so
+      the default and `@{N}` mean the timeline the user just looked at.
+      **Guard:** the resolved commit must carry the D1 jog identity —
+      `--at HEAD` is an error, back only restores from the timeline.
+- [x] **Restore is itself snapshotted first** (`pre: jog back …`) — undo is
+      undoable. Mandatory, not best-effort: it's the undo point and the
+      `--all` diff base; contention or failure aborts the restore.
+- [x] Single file(s): `git restore --source=<snap> --worktree -- <path>…`
       (never `checkout <snap> -- path`; it stages — verified trap)
-- [ ] `--all`: diff target snapshot against the just-taken pre-restore
-      snapshot (`git diff --name-status <target> <fresh>`); restore
-      modified/deleted paths, **delete** paths added since the target. Plain
-      `restore --source` alone can't delete — this diff-driven pass is what
-      makes `--all` honest. Never touches ignored files (they're in neither
-      tree).
-- [ ] Index byte-identical before/after (invariant test)
+- [x] `--all`: diff target snapshot against the just-taken pre-restore
+      snapshot; restore modified/deleted paths, **delete** paths added since
+      the target (plus now-empty parent dirs). Never touches ignored files
+      (they're in neither tree).
+- [x] Index byte-identical before/after single-file and --all (row 15);
+      undo-of-undo covered both ways; prints an undo hint after each restore
 
 ### M7 — docs + dogfood exit (S)
 

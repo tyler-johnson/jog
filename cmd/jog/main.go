@@ -58,7 +58,7 @@ func run(args []string) int {
 	case "snaps":
 		return cli.Snaps(args[1:])
 	case "back":
-		return notImplemented("back", "M6")
+		return cli.Back(args[1:])
 	case "hook":
 		// Everything under `jog hook` exits 0, even misconfiguration — a
 		// non-zero exit from a hook blocks the user's tool call or prompt.
@@ -81,11 +81,6 @@ func run(args []string) int {
 			args[0], strings.Join(args, " "))
 		return 1
 	}
-}
-
-func notImplemented(what, milestone string) int {
-	fmt.Fprintf(os.Stderr, "jog: %s is not implemented yet (%s)\n", what, milestone)
-	return 1
 }
 
 // versionString reads the version Go embeds at build time: the module

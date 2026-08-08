@@ -171,6 +171,123 @@ func TestPassthroughSnapshotsBeforeDestruction(t *testing.T) {
 	}
 }
 
+// Matrix row 15 — jog back: worktree-only restores, index byte-identical,
+// --all deletes files added since the target, restores are undoable.
+func TestBack(t *testing.T) {
+	tr := testrepo.New(t)
+	tr.Write("a.txt", "committed\n")
+	tr.Commit("first")
+	tr.Write("a.txt", "version one\n")
+	tr.Write("u.txt", "untracked treasure\n")
+	runJog(t, tr.Dir, "-m", "target state")
+	tr.Write("a.txt", "version two\n")
+	tr.Remove("u.txt")
+	tr.Write("new.txt", "added after target\n")
+
+	idx := tr.IndexBytes()
+
+	// Single file, default target (newest snapshot at command start).
+	stdout, stderr, code := runJog(t, tr.Dir, "back", "a.txt")
+	if code != 0 {
+		t.Fatalf("back a.txt: %d %s", code, stderr)
+	}
+	if got, _ := os.ReadFile(filepath.Join(tr.Dir, "a.txt")); string(got) != "version one\n" {
+		t.Errorf("a.txt = %q", got)
+	}
+	if !bytes.Equal(idx, tr.IndexBytes()) {
+		t.Fatal("index bytes changed across single-file back")
+	}
+	// The restore snapshotted first; its snapshot holds "version two".
+	if got := tr.Git("show", "refs/jog/main:a.txt"); got != "version two" {
+		t.Errorf("pre-restore snapshot content = %q", got)
+	}
+
+	// Undo the undo: default target is now the pre-restore snapshot.
+	runJog(t, tr.Dir, "back", "a.txt")
+	if got, _ := os.ReadFile(filepath.Join(tr.Dir, "a.txt")); string(got) != "version two\n" {
+		t.Errorf("undo-of-undo: a.txt = %q", got)
+	}
+
+	// Deleted untracked file, restored by name.
+	if _, _, code := runJog(t, tr.Dir, "back", "u.txt", "--at", "@{2}"); code != 0 {
+		t.Fatal("back u.txt failed")
+	}
+	if got, _ := os.ReadFile(filepath.Join(tr.Dir, "u.txt")); string(got) != "untracked treasure\n" {
+		t.Errorf("u.txt = %q", got)
+	}
+
+	// --all to an explicit snap id: worktree becomes exactly the target
+	// tree — including deleting new.txt, which no git command alone does.
+	targetSha := strings.Fields(tr.Git("log", "--format=%h %s", "refs/jog/main"))
+	var target string
+	for i := 0; i < len(targetSha)-1; i++ {
+		if targetSha[i+1] == "manual:" { // "manual: target state"
+			target = targetSha[i]
+			break
+		}
+	}
+	if target == "" {
+		t.Fatal("could not find target snapshot id")
+	}
+	idx = tr.IndexBytes()
+	stdout, stderr, code = runJog(t, tr.Dir, "back", "--all", "--at", target)
+	if code != 0 {
+		t.Fatalf("back --all: %d %s", code, stderr)
+	}
+	if !bytes.Equal(idx, tr.IndexBytes()) {
+		t.Fatal("index bytes changed across back --all")
+	}
+	if got, _ := os.ReadFile(filepath.Join(tr.Dir, "a.txt")); string(got) != "version one\n" {
+		t.Errorf("--all: a.txt = %q", got)
+	}
+	if got, _ := os.ReadFile(filepath.Join(tr.Dir, "u.txt")); string(got) != "untracked treasure\n" {
+		t.Errorf("--all: u.txt = %q", got)
+	}
+	if _, err := os.Stat(filepath.Join(tr.Dir, "new.txt")); !os.IsNotExist(err) {
+		t.Error("--all did not delete new.txt (added after target)")
+	}
+	if !strings.Contains(stdout, "deleted") {
+		t.Errorf("summary missing: %q", stdout)
+	}
+
+	// Undo of --all brings new.txt back.
+	runJog(t, tr.Dir, "back", "--all")
+	if _, err := os.Stat(filepath.Join(tr.Dir, "new.txt")); err != nil {
+		t.Error("undo of --all did not restore new.txt")
+	}
+}
+
+// back refuses non-snapshot targets and bad grammar; reflog time syntax
+// falls back to oldest past the horizon (verified git behavior).
+func TestBackGuards(t *testing.T) {
+	tr := testrepo.New(t)
+	tr.Write("a.txt", "oldest\n")
+	tr.Commit("first")
+	tr.Write("a.txt", "snapshotted oldest\n")
+	runJog(t, tr.Dir, "-m", "one")
+	tr.Write("a.txt", "snapshotted newest\n")
+	runJog(t, tr.Dir, "-m", "two")
+	tr.Write("a.txt", "dirty\n")
+
+	// HEAD is a real commit, not a snapshot.
+	_, stderr, code := runJog(t, tr.Dir, "back", "a.txt", "--at", "HEAD")
+	if code != 1 || !strings.Contains(stderr, "not a jog snapshot") {
+		t.Errorf("--at HEAD: code=%d stderr=%q", code, stderr)
+	}
+	// --all plus paths is a grammar error.
+	if _, _, code := runJog(t, tr.Dir, "back", "--all", "a.txt"); code != 2 {
+		t.Errorf("--all with paths: code=%d", code)
+	}
+	// A time past the oldest entry falls back to oldest, exit 0.
+	_, _, code = runJog(t, tr.Dir, "back", "a.txt", "--at", "30.minutes.ago")
+	if code != 0 {
+		t.Fatalf("past-oldest time query exited %d", code)
+	}
+	if got, _ := os.ReadFile(filepath.Join(tr.Dir, "a.txt")); string(got) != "snapshotted oldest\n" {
+		t.Errorf("past-oldest fallback restored %q, want oldest snapshot", got)
+	}
+}
+
 // D11: `jog <unknown>` is an error with a `jog git` hint — never an
 // implicit passthrough, and never a snapshot.
 func TestUnknownCommandErrors(t *testing.T) {

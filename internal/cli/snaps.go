@@ -79,11 +79,7 @@ func Snaps(args []string) int {
 // real history; the boundary is the first commit not committed by the fixed
 // jog identity (D1), and `boundary..ref` excludes it and everything below.
 func chainRange(repo *gitx.Repo) (ref, rng string, exists bool, err error) {
-	branch, berr := repo.RunRead("symbolic-ref", "--short", "HEAD")
-	ref = "refs/jog/@detached"
-	if berr == nil {
-		ref = "refs/jog/" + branch
-	}
+	ref = chainRef(repo)
 	if _, verr := repo.RunRead("rev-parse", "-q", "--verify", ref); verr != nil {
 		return ref, "", false, nil
 	}
@@ -110,6 +106,16 @@ func chainRange(repo *gitx.Repo) (ref, rng string, exists bool, err error) {
 		rng = boundary + ".." + ref
 	}
 	return ref, rng, true, nil
+}
+
+// chainRef resolves the current branch's chain ref (refs/jog/<branch>, or
+// refs/jog/@detached on a detached HEAD).
+func chainRef(repo *gitx.Repo) string {
+	branch, err := repo.RunRead("symbolic-ref", "--short", "HEAD")
+	if err != nil {
+		return "refs/jog/@detached"
+	}
+	return "refs/jog/" + branch
 }
 
 // recentEntries returns the newest n timeline lines, for the bare-`jog`
