@@ -112,18 +112,25 @@ Milestones are sequential; each lands with its tests. Dogfood begins at M4.
       working git invocations and must reach git under the alias (same
       principle as D7). jog's docs live in the README.
 
-### M4 — `jog hook claude` (M) → **dogfood starts**
+### M4 — `jog hook claude` (M) → **dogfood started 2026-08-08** — ✅ done
 
-- [ ] Parse hook JSON from stdin: `hook_event_name`, `session_id`, `cwd`,
+- [x] Parse hook JSON from stdin: `hook_event_name`, `session_id`, `cwd`,
       `tool_name` + `tool_input` (Bash `command`, Edit/Write `file_path`),
-      UserPromptSubmit `prompt`
-- [ ] Provenance: `claude[<sid[:8]>]: Bash(<cmd>)` / `Edit(<path>)` /
-      `prompt "<text>"` — single line, truncated ~80 chars
-- [ ] Iron rule: **always exit 0** — malformed JSON, not a repo (use `cwd`
-      from the payload, not process cwd), engine error, anything. Diagnostics
-      only behind `JOG_DEBUG=1`.
-- [ ] Wire my own `~/.claude/settings.json` (DESIGN §6 snippet) + shell alias;
-      begin daily dogfood on this repo
+      UserPromptSubmit `prompt` — defensively; unknown tools/events degrade
+      to honest generic provenance
+- [x] Provenance: `claude[<sid[:8]>]: Bash(<cmd>)` / `Edit(<path>)` /
+      `prompt "<text>"` — single line, truncated ~80 chars; tool paths
+      relativized against the payload cwd
+- [x] Iron rule: **always exit 0** — malformed JSON, not a repo (use `cwd`
+      from the payload, not process cwd), engine error, unknown adapter,
+      anything. Diagnostics only behind `JOG_DEBUG=1`. Stdout always empty
+      (UserPromptSubmit stdout injects into Claude's context).
+- [x] Wired `~/.claude/settings.json` (PreToolUse `Bash|Edit|Write|NotebookEdit`
+      + UserPromptSubmit → `/home/pi/go/bin/jog hook claude`, absolute path —
+      ~/go/bin isn't on PATH for non-interactive contexts) and `.bashrc`
+      (`export PATH` + `alias git=jog`). Hook verified live in-session:
+      snapshot landed causally before a Bash call with correct session
+      provenance; unchanged trees correctly no-op. Dogfood is on.
 
 ### M5 — `jog snaps` (M)
 
