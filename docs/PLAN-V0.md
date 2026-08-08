@@ -308,7 +308,14 @@ fact from DESIGN §4's table — the table *is* the spec:
       deleted *untracked* file (invisible to git status) all restored
       byte-identical (sha256-verified) via one `jog back … --at <id>`.
       An organic, unstaged rescue will still count double when it happens.
-- [ ] `snaps` timeline readable and correctly scoped after a rebase and a
-      branch switch on a dogfood repo
+- [x] `snaps` timeline verified across a rebase and branch switch (drill on
+      this repo, 2026-08-08): chains are a properly scoped forest (drill
+      entries never appear on main's timeline and vice versa); the chain
+      continues across `rebase --autostash` with base edges flipping from
+      the pre-rebase commit to the rebased one (old era stays reachable);
+      first-snapshot boundary held; a snapshot between two tree-identical
+      states correctly no-op'd. Bonus: after `branch -D`, the chain ref
+      survives and stock `git show refs/jog/drill/timeline:file` recovers
+      work from the deleted branch.
 - [ ] README complete enough that a stranger could install and understand
       the leak vectors and accepted gaps
