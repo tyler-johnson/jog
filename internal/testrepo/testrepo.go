@@ -63,6 +63,21 @@ func (r *Repo) TryGit(args ...string) (string, error) {
 	return strings.TrimSpace(string(out)), err
 }
 
+// GitEnv runs git with extra environment entries appended after the
+// fixture's own (last wins), for tests needing controlled identities,
+// dates, or index files. Fails the test on non-zero exit.
+func (r *Repo) GitEnv(env []string, args ...string) string {
+	r.t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = r.Dir
+	cmd.Env = append(append([]string{}, r.env...), env...)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		r.t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, out)
+	}
+	return strings.TrimSpace(string(out))
+}
+
 // Write creates or overwrites a file (path relative to the worktree),
 // creating parent directories as needed.
 func (r *Repo) Write(path, content string) {

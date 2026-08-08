@@ -113,6 +113,9 @@ func forestRanges(repo *gitx.Repo) ([]string, error) {
 	var args []string
 	var bounds []string
 	for _, ref := range strings.Split(out, "\n") {
+		if strings.HasPrefix(ref, "refs/jog/@trash/") {
+			continue // trim's insurance refs are not chains
+		}
 		boundary, err := chainBoundary(repo, ref)
 		if err != nil {
 			return nil, err

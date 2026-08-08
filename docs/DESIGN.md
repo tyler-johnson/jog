@@ -342,9 +342,13 @@ Accepted gaps (documented, not defended):
    risk, for cargo users), PyPI `jog` (old logging lib). Exact-name GitHub
    repos are small/dormant (natethinks/jog ★472 shell script, tj/jog ★130,
    qiangyt/jog ★43); nothing in the git-tooling niche uses the name.
-2. Retention defaults — are 24h/7d/90d the right taper?
-3. `trim` chain-rewrite details: preserve base edges of surviving snapshots
-   verbatim vs re-parent; cheap either way, pick during implementation.
+2. ~~Retention defaults — are 24h/7d/90d the right taper?~~ **Closed for v1
+   2026-08-08 (PLAN-V1 D16):** defaults stand, configurable via
+   `jog.keepAll`/`keepHourly`/`keepDaily` in git's own expiry syntax;
+   revisit only if dogfood argues.
+3. ~~`trim` chain-rewrite details.~~ **Closed 2026-08-08 (PLAN-V1 D17):**
+   base edges preserved verbatim; parent 1 relinked; a new oldest survivor
+   anchors to its own base edge; reflog replayed with original timestamps.
 4. ~~Provenance for user manual edits swept up by an agent-triggered
    snapshot.~~ **Closed 2026-08-08 (PLAN-V1 D14):** no `sweep:` label —
    provenance records what jog ran ahead of, never inferred authorship;

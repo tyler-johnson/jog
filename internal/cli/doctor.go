@@ -92,6 +92,7 @@ func (d *doctor) checkRepo(repo *gitx.Repo, fix bool) {
 	}
 
 	var chainLines []string
+	var trashLines []string
 	badIdentity := 0
 	noReflog := 0
 	for _, line := range strings.Split(out, "\n") {
@@ -101,6 +102,14 @@ func (d *doctor) checkRepo(repo *gitx.Repo, fix bool) {
 		}
 		ref, unix, email := parts[0], parts[1], strings.Trim(parts[2], "<>")
 		name := strings.TrimPrefix(ref, "refs/jog/")
+		if strings.HasPrefix(name, "@trash/") {
+			// trim's one-deep insurance refs — not chains, just report.
+			if sec, err := strconv.ParseInt(unix, 10, 64); err == nil {
+				trashLines = append(trashLines, fmt.Sprintf("%s %s",
+					strings.TrimPrefix(name, "@trash/"), humanAge(time.Since(time.Unix(sec, 0)))))
+			}
+			continue
+		}
 		if sec, err := strconv.ParseInt(unix, 10, 64); err == nil {
 			chainLines = append(chainLines, fmt.Sprintf("%s %s", name, humanAge(time.Since(time.Unix(sec, 0)))))
 		}
@@ -118,6 +127,9 @@ func (d *doctor) checkRepo(repo *gitx.Repo, fix bool) {
 		}
 	}
 	d.ok("chains", fmt.Sprintf("%d (%s)", len(chainLines), strings.Join(chainLines, ", ")))
+	if len(trashLines) > 0 {
+		d.info("trim trash", fmt.Sprintf("pre-trim tips held until the next trim: %s", strings.Join(trashLines, ", ")))
+	}
 	if badIdentity == 0 {
 		d.ok("identity", fmt.Sprintf("chain tips carry %s <%s>", snap.IdentityName, snap.IdentityEmail))
 	}

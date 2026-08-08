@@ -146,37 +146,45 @@ writes, `doctor` before `trim` (the auditor exists before the first deleter),
       manufactured findings (dead engine, stripped gc keys, foreign tip,
       unwired triggers).
 
-### M11 — `jog trim` + retention (L, the core of v1)
+### M11 — `jog trim` + retention (L, the core of v1) — ✅ done 2026-08-08
 
-The first feature that deletes anything. It gets the densest tests, a
-dry-run, an insurance ref, and lands manual-only — automation follows
-separately after dogfood.
+The first feature that deletes anything. It got the densest tests (rows
+24–29), a dry-run, an insurance ref, and landed manual-only — automation
+follows separately after dogfood (D19). Dry-run verified on both real
+repos (all snapshots inside keep-all; correctly nothing to drop).
 
-- [ ] `internal/retain`: pure taper policy — given `(now, []snapshot times)`,
-      return keep/drop. Defaults per DESIGN §7: everything ≤ 24 h, hourly
-      ≤ 7 d, daily ≤ 90 d; config keys `jog.keepAll` / `jog.keepHourly` /
-      `jog.keepDaily` (git-duration values). Property tests, no git (D16).
-- [ ] Chain rewrite (closes Q3, D17): survivors are re-committed with tree,
-      author/committer identity+dates, and message verbatim; parent 1
-      relinked to the previous survivor; **parent 2 (base edge) preserved
-      verbatim** — re-parenting would forge history the snapshot never saw
-      and break era disambiguation. Reflog rebuilt to survivors only, so
-      time queries stay truthful. CAS on the final ref update; a concurrent
-      snapshot losing the race is the snapshot engine's normal contention
-      path.
-- [ ] Insurance: before the rewrite, the old chain head is saved at
-      `refs/jog/@trash/<branch>` (no reflog, overwritten by the next trim) —
-      one full undo window per chain, reclaimed automatically at the trim
-      after next (D18). `doctor` reports trash refs and their age.
-- [ ] `trim --dry-run` prints the keep/drop plan (counts + dropped-range
-      summary per chain) and touches nothing. `trim` without flags applies
-      to all chains, then runs `git gc --auto` (the plumbing-only engine
-      never triggers it — DESIGN §4 table).
-- [ ] **Not in this milestone:** piggybacking trim onto snapshots. Lands
-      only after ≥ 2 weeks of manual-trim dogfood, as a separate small
-      change: at most once per day, checked via a cheap timestamp file in
-      `.git/jog/`, never on the hook path (hooks must stay worst-case-fast
-      and silent) (D19).
+- [x] `internal/retain`: pure taper policy, no git (D16). Defaults per
+      DESIGN §7 (24 h / hourly 7 d / daily 90 d), newest-per-bucket,
+      epoch-UTC-aligned buckets. Config `jog.keepAll`/`keepHourly`/
+      `keepDaily` in **git's own expiry syntax** (`3.days`, `never` —
+      parsed by git via `--type=expiry-date`, lab-verified; `never` turns a
+      tier off). Property tests: taper counts, newest-per-bucket,
+      idempotence at fixed now, no-resurrection as now advances, bucket
+      edges. (Plan originally said "monotonicity under insertion" — that
+      property belongs to oldest-per-bucket; the properties that actually
+      matter for an append-only timeline are the two above.)
+- [x] Chain rewrite (closes Q3, D17): survivors re-committed with tree,
+      dates, and message verbatim; parent 1 relinked; **base edge
+      untouched**; a new oldest survivor anchors to its own base edge so
+      walks still terminate on a real commit it sat on. Original shas are
+      preserved below the first drop. Reflog **replayed with original
+      timestamps** — `update-ref` honors `GIT_COMMITTER_DATE` in reflog
+      entries (lab-verified), so `@{time}` stays truthful. Tip always
+      survives. Contention: tip verified before anything moves, and the
+      ref swap starts with a CAS-guarded delete — a concurrent mint wins,
+      the chain is skipped untouched (row 28, deterministic test).
+- [x] Insurance (D18): pre-trim tip saved at `refs/jog/@trash/<branch>`
+      before any write; clobbered by the next trim. `doctor` reports trash
+      refs; `snaps --all` and trim itself exclude them from chain
+      enumeration. README leak-vector list mentions trash holds dropped
+      snapshots one cycle longer.
+- [x] `trim --dry-run` prints the plan and provably touches nothing (ref,
+      reflog, no trash ref — row 27). Apply reports per chain and runs
+      `git gc --auto --quiet` once at the end. Trim snapshots first like
+      every jog command; its boundary snapshot lands in the keep-all tier.
+- [x] **Still not in this milestone** (D19): piggybacked automation —
+      manual-only until ≥ 2 weeks of dogfood; the checklist item below
+      carries it.
 
 ### M12 — `jog pick` (M)
 

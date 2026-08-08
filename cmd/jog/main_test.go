@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/tyler-johnson/jog/internal/testrepo"
 )
@@ -453,9 +454,9 @@ func strconvQuote(s string) string {
 
 func TestReservedVerbStub(t *testing.T) {
 	dir := t.TempDir()
-	_, stderr, code := runJog(t, dir, "trim")
+	_, stderr, code := runJog(t, dir, "pick")
 	if code != 1 || !strings.Contains(stderr, "reserved") {
-		t.Errorf("trim stub: code=%d stderr=%q", code, stderr)
+		t.Errorf("pick stub: code=%d stderr=%q", code, stderr)
 	}
 }
 
@@ -681,4 +682,168 @@ func sortLines(s string) string {
 	lines := strings.Split(strings.TrimSpace(s), "\n")
 	sort.Strings(lines)
 	return strings.Join(lines, "\n")
+}
+
+// mintSnap builds one real snapshot commit on ref with a controlled date,
+// mirroring the engine's shape exactly (D1 identity, parent 1 = previous
+// snapshot, parent 2 = base edge, dated reflog entry).
+func mintSnap(t *testing.T, tr *testrepo.Repo, ref, content string, date time.Time, base string) string {
+	t.Helper()
+	tr.Write("w.txt", content)
+	idx := filepath.Join(tr.GitDir, "test-trim-index")
+	env := []string{"GIT_INDEX_FILE=" + idx}
+	tr.GitEnv(env, "add", "-A")
+	tree := tr.GitEnv(env, "write-tree")
+
+	d := date.Format(time.RFC3339)
+	ident := []string{
+		"GIT_AUTHOR_NAME=jog", "GIT_AUTHOR_EMAIL=jog@local",
+		"GIT_COMMITTER_NAME=jog", "GIT_COMMITTER_EMAIL=jog@local",
+		"GIT_AUTHOR_DATE=" + d, "GIT_COMMITTER_DATE=" + d,
+	}
+	prev, perr := tr.TryGit("rev-parse", "-q", "--verify", ref)
+	args := []string{"commit-tree", tree}
+	if perr == nil {
+		args = append(args, "-p", prev)
+	}
+	if base != "" {
+		args = append(args, "-p", base)
+	}
+	args = append(args, "-m", "manual: "+content)
+	sha := tr.GitEnv(ident, args...)
+	if perr != nil {
+		prev = ""
+	}
+	tr.GitEnv(ident, "update-ref", "--create-reflog", "-m", "manual: "+content, ref, sha, prev)
+	return sha
+}
+
+// TestTrim covers matrix rows 25–27 and 29: taper applied through a real
+// chain rewrite — survivors byte-preserved (tree, dates, message, base
+// edge), dropped snapshots off the timeline but held by the insurance ref,
+// reflog replayed with true timestamps, dry-run inert, keep-all fenced,
+// user index untouched.
+func TestTrim(t *testing.T) {
+	tr := testrepo.New(t)
+	tr.Write("a.txt", "real\n")
+	tr.Commit("real history commit")
+	head := tr.Git("rev-parse", "HEAD")
+
+	now := time.Now()
+	utcDay := func(age time.Duration, offset time.Duration) time.Time {
+		return now.Add(-age).UTC().Truncate(24 * time.Hour).Add(offset)
+	}
+	utcHour := func(age time.Duration, offset time.Duration) time.Time {
+		return now.Add(-age).UTC().Truncate(time.Hour).Add(offset)
+	}
+
+	ref := "refs/jog/main"
+	ancient := mintSnap(t, tr, ref, "ancient", now.Add(-95*24*time.Hour), head)
+	dailyA1 := mintSnap(t, tr, ref, "dailyA1", utcDay(10*24*time.Hour, 2*time.Hour), head)
+	dailyA2 := mintSnap(t, tr, ref, "dailyA2", utcDay(10*24*time.Hour, 3*time.Hour), head)
+	hourlyB1 := mintSnap(t, tr, ref, "hourlyB1", utcHour(72*time.Hour, 10*time.Minute), head)
+	hourlyB2 := mintSnap(t, tr, ref, "hourlyB2", utcHour(72*time.Hour, 25*time.Minute), head)
+	recent := mintSnap(t, tr, ref, "recent", now.Add(-2*time.Hour), head)
+	tip := mintSnap(t, tr, ref, "tip", now.Add(-10*time.Minute), head)
+
+	survivorMeta := map[string]string{}
+	for _, sha := range []string{dailyA2, hourlyB2, recent, tip} {
+		survivorMeta[sha] = tr.Git("log", "-1", "--date=raw", "--format=%T|%ad|%cd|%B|%P", sha)
+	}
+	idxBefore := tr.IndexBytes()
+	reflogBefore := tr.Git("reflog", "show", ref)
+
+	// Dry run: the plan, and nothing else.
+	stdout, stderr, code := runJog(t, tr.Dir, "trim", "--dry-run")
+	if code != 0 || !strings.Contains(stdout, "would drop 3 of 7") {
+		t.Fatalf("dry-run: code=%d\n%s%s", code, stdout, stderr)
+	}
+	if got := tr.Git("rev-parse", ref); got != tip {
+		t.Fatalf("dry-run moved the ref: %s", got)
+	}
+	if got := tr.Git("reflog", "show", ref); got != reflogBefore {
+		t.Fatalf("dry-run touched the reflog")
+	}
+	if _, err := tr.TryGit("rev-parse", "-q", "--verify", "refs/jog/@trash/main"); err == nil {
+		t.Fatalf("dry-run wrote the insurance ref")
+	}
+
+	// Apply. The pre-trim snapshot no-ops (worktree == tip content).
+	stdout, stderr, code = runJog(t, tr.Dir, "trim")
+	if code != 0 || !strings.Contains(stdout, "dropped 3 of 7") {
+		t.Fatalf("trim: code=%d\n%s%s", code, stdout, stderr)
+	}
+
+	// Row 29: the user's index is untouched by the one command that deletes.
+	if !bytes.Equal(idxBefore, tr.IndexBytes()) {
+		t.Error("trim modified the user's index")
+	}
+
+	// The surviving timeline: 4 jog snapshots, then the boundary.
+	walk := tr.Git("log", "--first-parent", "--format=%ce|%T|%s", ref)
+	var jogLines []string
+	for _, l := range strings.Split(walk, "\n") {
+		if !strings.HasPrefix(l, "jog@local|") {
+			break
+		}
+		jogLines = append(jogLines, l)
+	}
+	if len(jogLines) != 4 {
+		t.Fatalf("survivor walk: want 4 jog snapshots, got %d:\n%s", len(jogLines), walk)
+	}
+	for i, want := range []string{"tip", "recent", "hourlyB2", "dailyA2"} {
+		if !strings.HasSuffix(jogLines[i], "manual: "+want) {
+			t.Errorf("survivor %d: want %q, got %q", i, want, jogLines[i])
+		}
+	}
+
+	// Row 25: survivors preserved verbatim — tree, author/committer dates,
+	// message, base edge; only parent 1 relinked.
+	newShas := strings.Split(tr.Git("rev-list", "--first-parent", "-4", ref), "\n")
+	for i, orig := range []string{tip, recent, hourlyB2, dailyA2} {
+		got := tr.Git("log", "-1", "--date=raw", "--format=%T|%ad|%cd|%B|%P", newShas[i])
+		want := survivorMeta[orig]
+		gw, ww := strings.Split(got, "|"), strings.Split(want, "|")
+		for f, name := range []string{"tree", "authordate", "commitdate", "message"} {
+			if gw[f] != ww[f] {
+				t.Errorf("survivor %d %s changed: %q → %q", i, name, ww[f], gw[f])
+			}
+		}
+		if !strings.HasSuffix(gw[4], head) {
+			t.Errorf("survivor %d lost its base edge: parents %q", i, gw[4])
+		}
+	}
+
+	// Dropped snapshots: off the timeline, held by the insurance ref.
+	revList := tr.Git("rev-list", "--first-parent", ref)
+	for _, dropped := range []string{ancient, dailyA1, hourlyB1} {
+		if strings.Contains(revList, dropped) {
+			t.Errorf("dropped snapshot %s still on the timeline", dropped[:7])
+		}
+		if _, err := tr.TryGit("cat-file", "-e", dropped); err != nil {
+			t.Errorf("dropped snapshot %s not held by the insurance ref", dropped[:7])
+		}
+	}
+	if got := tr.Git("rev-parse", "refs/jog/@trash/main"); got != tip {
+		t.Errorf("insurance ref: want pre-trim tip %s, got %s", tip[:7], got[:7])
+	}
+
+	// Row 26: reflog replayed with original timestamps — entry per
+	// survivor, and @{time} resolves truthfully.
+	reflog := tr.Git("reflog", "show", ref)
+	if got := len(strings.Split(reflog, "\n")); got != 4 {
+		t.Errorf("reflog: want 4 entries, got %d:\n%s", got, reflog)
+	}
+	atDaily := utcDay(10*24*time.Hour, 3*time.Hour).Add(30 * time.Minute).Format(time.RFC3339)
+	sha := tr.Git("rev-parse", ref+"@{"+atDaily+"}")
+	if wantTree := strings.Split(survivorMeta[dailyA2], "|")[0]; tr.Git("log", "-1", "--format=%T", sha) != wantTree {
+		t.Errorf("@{time} query resolved wrong survivor")
+	}
+
+	// Idempotence: a second trim finds nothing (its own boundary snapshot
+	// no-ops, and the survivors all satisfy the policy).
+	stdout, _, _ = runJog(t, tr.Dir, "trim")
+	if !strings.Contains(stdout, "nothing to trim") {
+		t.Errorf("second trim not idempotent:\n%s", stdout)
+	}
 }

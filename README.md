@@ -122,6 +122,7 @@ Two disjoint namespaces, one rule: **`jog git` is the only door to git.**
 | `jog back <path>… [--at T]` | restore files from a snapshot (worktree only) |
 | `jog back --all [--at T]` | restore the whole tree, including deleting files created since |
 | `jog git <args>` | snapshot, then run the real git command — what the alias expands to |
+| `jog trim [--dry-run]` | apply the retention taper; the previous tip stays at `refs/jog/@trash/<branch>` until the next trim |
 | `jog doctor [--fix]` | verify invariants, wiring, and liveness (`--fix` repairs the gc config) |
 | `jog version` | print jog's version |
 
@@ -135,7 +136,7 @@ ahead of**, never who made the changes. Manual edits swept up by an
 agent-triggered snapshot are attributed to that trigger — jog can't know who
 typed between boundaries, and refuses to guess.
 
-`pick`, `trim`, and `mcp` are reserved for future releases.
+`pick` and `mcp` are reserved for future releases.
 Anything else is an error — jog never guesses.
 
 ## Recovery cookbook
@@ -210,10 +211,11 @@ Also worth knowing:
 - `refs/jog/*` stays private through normal `push`/`fetch`/`clone`, but
   **leaks** via `push --mirror`, `clone --mirror`, explicit `refs/*:refs/*`
   refspecs, and `git bundle --all`. Your snapshots contain your scratch work
-  — know your mirror scripts.
-- v0 has no retention yet: snapshots accumulate until `jog trim` lands in v1.
-  Space cost is low (content-addressed, delta-compressed by repack), but the
-  timeline gets long.
+  — know your mirror scripts. (That includes `refs/jog/@trash/*`, which
+  holds snapshots the last `jog trim` dropped, one cycle longer.)
+- Retention is manual: run `jog trim` when you want the taper applied —
+  nothing schedules it behind your back. Space cost is low either way
+  (content-addressed, delta-compressed by repack).
 - New files over 50 MiB are skipped (configurable, see below) and listed in
   the timeline entry.
 
@@ -224,6 +226,9 @@ Native `git config` keys — global or per-repo, no new file format:
 | key | default | meaning |
 |---|---|---|
 | `jog.maxFileSize` | `50m` | skip new files larger than this (`0` disables the guard) |
+| `jog.keepAll` | `24.hours` | `jog trim` keeps every snapshot younger than this |
+| `jog.keepHourly` | `7.days` | …then one per hour up to this age |
+| `jog.keepDaily` | `90.days` | …then one per day up to this age; older ones are dropped (`never` disables a tier) |
 | `gc.refs/jog/*.reflogExpire` | `never` | set by jog on first snapshot; keeps gc off jog's reflogs |
 | `gc.refs/jog/*.reflogExpireUnreachable` | `never` | same |
 
