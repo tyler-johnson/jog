@@ -95,18 +95,22 @@ Milestones are sequential; each lands with its tests. Dogfood begins at M4.
       (decision D3 below)
 - [x] Test matrix rows 1–14, 19, 20 (15–18 land with their milestones)
 
-### M3 — CLI dispatch + passthrough (M)
+### M3 — CLI dispatch + passthrough (M) — ✅ done
 
-- [ ] Reserved-verb table: v0 verbs live; `since`/`pick`/`trim`/`mcp`/`doctor`
+- [x] Reserved-verb table: v0 verbs live; `since`/`pick`/`trim`/`mcp`/`doctor`
       recognized but stubbed ("not in v0") — reserving them *now* means adding
       them later never changes passthrough semantics
-- [ ] Bare `jog` / `jog -m "msg"` → snapshot with `manual:` provenance
-- [ ] Passthrough: snapshot with `pre: git <args>` provenance, then
+- [x] Bare `jog` / `jog -m "msg"` → snapshot with `manual:` provenance
+      (`internal/provenance`: single line, 120-rune cap)
+- [x] Passthrough: snapshot with `pre: git <args>` provenance, then
       `syscall.Exec` the real git (`exec.LookPath("git")`; alias-only install
       means no self-recursion risk) — real TTY, real exit code
-- [ ] **Snapshot failure never blocks the command:** any engine error on the
+- [x] **Snapshot failure never blocks the command:** any engine error on the
       passthrough path warns on stderr and execs git anyway
-- [ ] Outside a repo, passthrough still execs git cleanly (no snapshot, no noise)
+- [x] Outside a repo, passthrough still execs git cleanly (no snapshot, no noise)
+- [x] *Correction to M0:* no jog `help`/`-h`/`--help` interception — those are
+      working git invocations and must reach git under the alias (same
+      principle as D7). jog's docs live in the README.
 
 ### M4 — `jog hook claude` (M) → **dogfood starts**
 

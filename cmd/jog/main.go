@@ -1,23 +1,20 @@
 // jog — a memory for your working tree.
 //
 // Reserved verbs are handled by jog; anything else snapshots and then execs
-// the real git binary (see docs/DESIGN.md §5). Verbs beyond the v0 set are
-// reserved now so adding them later never changes passthrough semantics.
+// the real git binary (docs/DESIGN.md §5). The reserved list collides with
+// no working git invocation — that includes help: `git help`, `--help`, and
+// `-h` all pass through, because under `alias git=jog` they must behave
+// exactly like git. jog's own documentation lives in the README.
+// Verbs beyond the v0 set are reserved now so adding them later never
+// changes passthrough semantics.
 package main
 
 import (
 	"fmt"
 	"os"
+
+	"github.com/tyler-johnson/jog/internal/cli"
 )
-
-const usage = `jog — a memory for your working tree
-
-  jog                       snapshot now (also: jog -m "msg")
-  jog snaps [path]          timeline of snapshots on this branch
-  jog back <path> [--at T]  restore a file (or --all --at T for the whole tree)
-  jog hook claude           Claude Code hook entry point
-  jog <anything else>       snapshot, then run the real git command
-`
 
 func main() {
 	os.Exit(run(os.Args[1:]))
@@ -25,11 +22,16 @@ func main() {
 
 func run(args []string) int {
 	if len(args) == 0 {
-		return notImplemented("snapshot", "M2")
+		return cli.Snapshot("")
 	}
 	switch args[0] {
 	case "-m":
-		return notImplemented("snapshot", "M2")
+		// Not a git global flag (`git -m` is an error), so safe to reserve.
+		if len(args) < 2 {
+			fmt.Fprintln(os.Stderr, `jog: -m requires a message (jog -m "before surgery")`)
+			return 2
+		}
+		return cli.Snapshot(args[1])
 	case "snaps":
 		return notImplemented("snaps", "M5")
 	case "back":
@@ -39,11 +41,8 @@ func run(args []string) int {
 	case "since", "pick", "trim", "mcp", "doctor":
 		fmt.Fprintf(os.Stderr, "jog: %q is reserved for a future release (see docs/PLAN-V0.md)\n", args[0])
 		return 1
-	case "-h", "--help", "help":
-		fmt.Print(usage)
-		return 0
 	default:
-		return notImplemented("git passthrough", "M3")
+		return cli.Passthrough(args)
 	}
 }
 
