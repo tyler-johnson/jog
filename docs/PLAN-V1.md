@@ -208,8 +208,10 @@ repos (all snapshots inside keep-all; correctly nothing to drop).
       usage cases. TUI boot smoke-tested under a pty (alt-screen enter +
       first render confirmed; the fake pty can't answer terminal queries,
       so the interactive loop is verified by hand instead).
-- [ ] Interactive drill on a real terminal (Tyler): scrub + restore + undo
-      once in anger — the exit-checklist item carries it.
+- [x] Interactive run verified on a real terminal (Tyler, 2026-08-08,
+      scrubbing the README) — TUI confirmed working end to end. An *organic*
+      rescue with it still counts extra; the exit-checklist item carries
+      that.
 
 ### M13 — release channel (S/M) — ✅ done 2026-08-08
 
@@ -350,7 +352,8 @@ property tests.
       piggyback land (D19). *(Clock starts when the first chains age past
       24 h — dry-runs verified correct on both repos day one.)*
 - [ ] `pick` used in anger for at least one real recovery or comparison
-      (also covers the interactive TUI drill M12 left open)
+      *(TUI itself verified interactively 2026-08-08 — what remains is an
+      organic use, not a functionality check)*
 - [ ] `brew install tyler-johnson/tap/jog` on a clean machine → alias +
       hooks → first snapshot, using only README + caveats text
 - [x] Tagged release with binaries for linux/darwin × amd64/arm64
