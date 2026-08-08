@@ -36,9 +36,10 @@ internal/cli/          snaps, back, passthrough, hook
 internal/testrepo/     integration-test fixture: temp repos driving real git
 ```
 
-- Go module path: placeholder `github.com/tyler-johnson/jog` until the
-  name-collision sweep (DESIGN open question 1). That sweep gates *publishing*,
-  not v0 — dogfood is local `go install`.
+- Go module path: `github.com/tyler-johnson/jog` — **published 2026-08-08**,
+  public, CI green. The name-collision sweep (DESIGN open question 1) came
+  back clean: no brew formula, no major GitHub tool, npm squatter irrelevant
+  to a Go binary.
 - Dependencies: stdlib only in v0. Bubble Tea and the MCP SDK arrive with
   their features (v1/v2).
 - Toolchain: latest stable Go; `go test ./...` + `go vet` in a GitHub Actions
