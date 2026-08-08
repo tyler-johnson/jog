@@ -13,6 +13,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"runtime/debug"
 	"strings"
 
 	"github.com/tyler-johnson/jog/internal/cli"
@@ -28,6 +29,7 @@ usage:
   jog back --all --at T     restore the whole working tree
   jog hook claude           Claude Code hook entry point (reads JSON on stdin)
   jog git <args>            snapshot, then run the real git command
+  jog version               print jog's version
 
 reserved for future releases: since, pick, trim, mcp, doctor
 
@@ -71,6 +73,9 @@ func run(args []string) int {
 	case "-h", "--help", "help":
 		fmt.Print(usage)
 		return 0
+	case "-v", "--version", "version":
+		fmt.Println(versionString())
+		return 0
 	default:
 		fmt.Fprintf(os.Stderr, "jog: unknown command %q — git commands go through: jog git %s\n",
 			args[0], strings.Join(args, " "))
@@ -81,4 +86,35 @@ func run(args []string) int {
 func notImplemented(what, milestone string) int {
 	fmt.Fprintf(os.Stderr, "jog: %s is not implemented yet (%s)\n", what, milestone)
 	return 1
+}
+
+// versionString reads the version Go embeds at build time: the module
+// version for tagged `go install` builds, the VCS revision for builds from
+// a checkout. No ldflags to keep in sync.
+func versionString() string {
+	v := "jog version "
+	info, ok := debug.ReadBuildInfo()
+	if !ok {
+		return v + "unknown"
+	}
+	v += info.Main.Version
+	// Pseudo-versions already embed the revision; only plain "(devel)"
+	// builds (e.g. go build from a checkout) need it appended.
+	if info.Main.Version == "(devel)" {
+		var rev, dirty string
+		for _, s := range info.Settings {
+			switch s.Key {
+			case "vcs.revision":
+				rev = s.Value
+			case "vcs.modified":
+				if s.Value == "true" {
+					dirty = ", dirty"
+				}
+			}
+		}
+		if len(rev) >= 12 {
+			v += " (" + rev[:12] + dirty + ")"
+		}
+	}
+	return v
 }

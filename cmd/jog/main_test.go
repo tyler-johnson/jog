@@ -191,6 +191,22 @@ func TestUnknownCommandErrors(t *testing.T) {
 	}
 }
 
+// jog's own version, in all three spellings; aliased `git version` still
+// reaches real git.
+func TestVersion(t *testing.T) {
+	dir := t.TempDir()
+	for _, arg := range []string{"-v", "--version", "version"} {
+		stdout, _, code := runJog(t, dir, arg)
+		if code != 0 || !strings.HasPrefix(stdout, "jog version ") {
+			t.Errorf("jog %s: code=%d stdout=%q", arg, code, stdout)
+		}
+	}
+	stdout, _, code := runJogAsGit(t, dir, "version")
+	if code != 0 || !strings.Contains(stdout, "git version") {
+		t.Errorf("aliased git version: code=%d stdout=%q", code, stdout)
+	}
+}
+
 // Through the alias (`jog git help`), help must reach real git; typed
 // directly, `jog -h` shows jog's own usage.
 func TestHelp(t *testing.T) {
