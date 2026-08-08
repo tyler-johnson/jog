@@ -345,10 +345,13 @@ Accepted gaps (documented, not defended):
 2. Retention defaults — are 24h/7d/90d the right taper?
 3. `trim` chain-rewrite details: preserve base edges of surviving snapshots
    verbatim vs re-parent; cheap either way, pick during implementation.
-4. Provenance for user manual edits swept up by an agent-triggered snapshot
-   (currently attributed to the triggering tool call — fine? label as `sweep:`?)
-5. Whether `jog snaps` default scope is current branch (git-like) — leaning
-   yes, with `--all` interleaving chains.
+4. ~~Provenance for user manual edits swept up by an agent-triggered
+   snapshot.~~ **Closed 2026-08-08 (PLAN-V1 D14):** no `sweep:` label —
+   provenance records what jog ran ahead of, never inferred authorship;
+   documented as a reading rule in the README.
+5. ~~Whether `jog snaps` default scope is current branch (git-like).~~
+   **Closed 2026-08-08:** yes — current branch by default (v0 D5),
+   `--all` interleaved forest shipped in v1 M9 (PLAN-V1 D13).
 6. Windows: `--no-optional-locks`, exec semantics (no execve — spawn+exit-code
    proxy), path handling. Not a v0 target.
 

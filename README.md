@@ -117,18 +117,25 @@ Two disjoint namespaces, one rule: **`jog git` is the only door to git.**
 |---|---|
 | `jog` | snapshot now, show the top of the timeline |
 | `jog -m "msg"` | snapshot with a message (`manual: msg`) |
-| `jog snaps [-p] [path…]` | the timeline: id, age, provenance, files changed (`-p`: patches) |
+| `jog snaps [-p] [--all] [path…]` | the timeline: id, age, provenance, files changed (`-p`: patches, `--all`: every branch, interleaved) |
+| `jog since [T] [path…]` | what changed since a snapshot (default: your last command boundary; `-p`: patches) |
 | `jog back <path>… [--at T]` | restore files from a snapshot (worktree only) |
 | `jog back --all [--at T]` | restore the whole tree, including deleting files created since |
 | `jog git <args>` | snapshot, then run the real git command — what the alias expands to |
 | `jog version` | print jog's version |
 
-`--at` accepts a snap id from `jog snaps` or git's reflog time syntax:
-`--at 20.minutes.ago`, `--at yesterday`. Asking for a time older than the
-oldest snapshot falls back to the oldest, with a warning.
+`--at` (and `since`'s target slot) accepts a snap id from `jog snaps` or
+git's reflog time syntax: `--at 20.minutes.ago`, `--at yesterday`. Asking
+for a time older than the oldest snapshot falls back to the oldest, with a
+warning.
 
-`since`, `pick`, `trim`, `mcp`, and `doctor` are reserved for future
-releases. Anything else is an error — jog never guesses.
+A reading rule for the timeline: provenance records **what jog was running
+ahead of**, never who made the changes. Manual edits swept up by an
+agent-triggered snapshot are attributed to that trigger — jog can't know who
+typed between boundaries, and refuses to guess.
+
+`pick`, `trim`, `mcp`, and `doctor` are reserved for future releases.
+Anything else is an error — jog never guesses.
 
 ## Recovery cookbook
 

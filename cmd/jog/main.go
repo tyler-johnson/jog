@@ -24,14 +24,15 @@ const usage = `jog — a memory for your working tree
 usage:
   jog                       snapshot now
   jog -m "msg"              snapshot with a message
-  jog snaps [path]          timeline of snapshots on this branch (-p: diffs)
+  jog snaps [path]          timeline of snapshots on this branch (-p: diffs, --all: every branch)
+  jog since [T] [path]      what changed since a snapshot (default: last command boundary)
   jog back <path> [--at T]  restore one file from a snapshot
   jog back --all --at T     restore the whole working tree
   jog hook claude           Claude Code hook entry point (reads JSON on stdin)
   jog git <args>            snapshot, then run the real git command
   jog version               print jog's version
 
-reserved for future releases: since, pick, trim, mcp, doctor
+reserved for future releases: pick, trim, mcp, doctor
 
 Install the alias so every git command snapshots first:
   alias git='jog git'
@@ -57,6 +58,8 @@ func run(args []string) int {
 		return cli.Snapshot(args[1])
 	case "snaps":
 		return cli.Snaps(args[1:])
+	case "since":
+		return cli.Since(args[1:])
 	case "back":
 		return cli.Back(args[1:])
 	case "hook":
@@ -67,7 +70,7 @@ func run(args []string) int {
 		}
 		fmt.Fprintln(os.Stderr, "jog: unknown hook adapter (want: jog hook claude)")
 		return 0
-	case "since", "pick", "trim", "mcp", "doctor":
+	case "pick", "trim", "mcp", "doctor":
 		fmt.Fprintf(os.Stderr, "jog: %q is reserved for a future release (see docs/PLAN-V0.md)\n", args[0])
 		return 1
 	case "-h", "--help", "help":

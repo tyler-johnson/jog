@@ -88,27 +88,42 @@ writes, `doctor` before `trim` (the auditor exists before the first deleter),
       Worth remembering when a repo's `since`/snapshot feels slow right
       after a mass file-generation step.
 
-### M9 — `jog since` + `jog snaps --all` (M)
+### M9 — `jog since` + `jog snaps --all` (M) — ✅ done 2026-08-08
 
-- [ ] `jog since [T] [path…]`: snapshot first (jj-style, same as `snaps`),
-      then diff *target snapshot ↔ fresh snapshot* — never the one-commit
-      diff form (misreports untracked as deleted, verified trap; DESIGN §5).
-      Default output diffstat + name-status; `-p` for patches; exec real
-      `git diff` so pager/coloring apply.
-- [ ] `T` grammar identical to `back --at` (snap id or reflog time syntax,
-      resolved via the same `resolveTarget`, D1-identity-guarded); bare
-      `jog since` diffs against `@{1}` — the snapshot before the one just
-      taken, i.e. "what changed since my last command boundary" (D12).
-- [ ] `jog snaps --all`: one exec'd `git log --first-parent` over every
-      `refs/jog/*` tip with per-chain boundaries excluded (`^<boundary>` per
-      chain) and `--source` decorating each entry with its chain (D13).
-      Timeline forest, interleaved by time — the full version of D6's top-3
-      readout.
-- [ ] Close Q4 (sweep provenance): manual edits swept up by an
-      agent-triggered snapshot stay attributed to the triggering event — the
-      timeline records *when* jog looked, not *who typed*; a `sweep:` label
-      would claim authorship knowledge the engine doesn't have. Document in
-      README instead (D14).
+- [x] `jog since [--at T | T] [-p] [--] [path…]`: snapshot first
+      (jj-style), then diff *target snapshot ↔ fresh snapshot* — never the
+      one-commit diff form (misreports untracked as deleted, verified trap;
+      DESIGN §5). Default output `--compact-summary` (one table carrying
+      both the name-status and diffstat roles: per-file churn plus
+      (new)/(gone)/mode annotations); `-p` for patches; exec real
+      `git diff` so pager/coloring apply. Prints a `since <id> (<age> —
+      <provenance>)` header naming the resolved target.
+- [x] `T` grammar identical to `back --at`, resolved via the shared
+      `resolveTarget` (D1-identity-guarded), and resolved *before* the
+      fresh snapshot, same rule as back. The first positional doubles as
+      the target when it doesn't exist on disk (`jog since 3h` vs
+      `jog since src/`; `--` forces paths). Bare `jog since` compares
+      against the pre-invocation chain tip — "what changed since my last
+      command boundary" (= `@{1}` whenever the fresh snapshot minted); an
+      unchanged tree prints `no changes since <target>` instead of an
+      empty diff (D12, refined).
+- [x] **Fixed a latent v0 bug found by reuse:** `back --at @{N}` resolved
+      through the commit-ish attempt first, which git reads as the *current
+      branch's* reflog — a real commit the identity guard then rejected.
+      `@{…}` targets now go straight to the chain ref.
+- [x] `jog snaps --all`: one exec'd `git log --first-parent` over every
+      `refs/jog/*` tip with per-chain boundaries excluded (`^<boundary>`
+      each) and `%S` attributing entries to their chain — tips are spelled
+      `jog/<branch>` so the label renders short (lab-verified: multi-tip
+      first-parent walks each chain independently, interleaves by commit
+      date, and honors multiple negations). The full version of D6's
+      top-3 readout.
+- [x] Closed Q4 (sweep provenance, D14): attribution stays with the
+      triggering event; documented as a README reading rule. DESIGN §12
+      Q4 + Q5 struck.
+- [x] Rows 21–23 green; verified live on both real repos (since header +
+      compact summary against hook-provenance targets; forest view shows
+      `jog/main` and the deleted-branch chain `jog/drill/timeline`).
 
 ### M10 — `jog doctor` (M)
 

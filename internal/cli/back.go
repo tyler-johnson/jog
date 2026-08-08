@@ -104,9 +104,17 @@ func resolveTarget(repo *gitx.Repo, ref, at string) (string, error) {
 		if sha, err = repo.RunRead("rev-parse", "-q", "--verify", ref); err != nil {
 			return "", fmt.Errorf("no snapshots on %s yet — nothing to restore from", strings.TrimPrefix(ref, "refs/jog/"))
 		}
+	case strings.HasPrefix(at, "@{"):
+		// Bare @{N}/@{time} must go straight to the chain ref: as a
+		// commit-ish, git would resolve it against the current branch's own
+		// reflog — a real commit the identity guard below then rejects.
+		spec := ref + at
+		if sha, err = repo.RunReadLoud("rev-parse", "-q", "--verify", spec+"^{commit}"); err != nil {
+			return "", fmt.Errorf("cannot resolve %q on %s", at, ref)
+		}
 	default:
 		if sha, err = repo.RunRead("rev-parse", "-q", "--verify", at+"^{commit}"); err != nil {
-			spec := ref + "@{" + strings.TrimSuffix(strings.TrimPrefix(at, "@{"), "}") + "}"
+			spec := ref + "@{" + at + "}"
 			if sha, err = repo.RunReadLoud("rev-parse", "-q", "--verify", spec+"^{commit}"); err != nil {
 				return "", fmt.Errorf("cannot resolve --at %q as a snap id or reflog time on %s", at, ref)
 			}

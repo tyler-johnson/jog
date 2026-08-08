@@ -457,3 +457,126 @@ func TestReservedVerbStub(t *testing.T) {
 		t.Errorf("trim stub: code=%d stderr=%q", code, stderr)
 	}
 }
+
+// TestSince covers matrix row 21: since diffs snapshot ↔ snapshot, so an
+// untracked file is reported as added — never as deleted, which the
+// one-commit diff form would claim (verified trap, DESIGN §5). Also covers
+// the D12 default (last command boundary) and the no-change fast exit.
+func TestSince(t *testing.T) {
+	tr := testrepo.New(t)
+	tr.Write("a.txt", "one\n")
+	tr.Commit("base")
+	runJog(t, tr.Dir, "-m", "boundary one")
+
+	tr.Write("a.txt", "two\n")
+	tr.Write("untracked.txt", "new\n")
+	stdout, stderr, code := runJog(t, tr.Dir, "since")
+	if code != 0 {
+		t.Fatalf("since exited %d: %s", code, stderr)
+	}
+	if !strings.Contains(stdout, "a.txt") {
+		t.Errorf("modified file missing from since output:\n%s", stdout)
+	}
+	if !strings.Contains(stdout, "untracked.txt (new") {
+		t.Errorf("untracked file not reported as added:\n%s", stdout)
+	}
+	if strings.Contains(stdout, "untracked.txt (gone") {
+		t.Errorf("untracked file misreported as deleted (one-commit diff trap):\n%s", stdout)
+	}
+
+	// Unchanged tree: the fresh snapshot no-ops, the pre-invocation tip is
+	// the fresh tip, and since says so instead of printing an empty diff.
+	stdout, stderr, code = runJog(t, tr.Dir, "since")
+	if code != 0 {
+		t.Fatalf("second since exited %d: %s", code, stderr)
+	}
+	if !strings.Contains(stdout, "no changes since") {
+		t.Errorf("expected no-changes message, got:\n%s", stdout)
+	}
+}
+
+// TestSinceGrammar covers matrix row 22: the target slot shares back --at's
+// grammar (snap id, reflog syntax, D1-identity-guarded) and the first
+// positional falls back to a path when it exists on disk.
+func TestSinceGrammar(t *testing.T) {
+	tr := testrepo.New(t)
+	tr.Write("a.txt", "one\n")
+	tr.Write("notes.txt", "keep\n")
+	tr.Commit("base")
+	runJog(t, tr.Dir, "-m", "first")
+	tr.Write("a.txt", "two\n")
+	runJog(t, tr.Dir, "-m", "second")
+
+	// HEAD is a real commit, not a snapshot — the identity guard rejects it.
+	_, stderr, code := runJog(t, tr.Dir, "since", "--at", "HEAD")
+	if code != 1 || !strings.Contains(stderr, "not a jog snapshot") {
+		t.Errorf("--at HEAD: code=%d stderr=%q", code, stderr)
+	}
+
+	// Chain reflog syntax resolves against the chain, not the branch's own
+	// reflog (regression: bare @{N} used to hit the branch reflog and fail
+	// the identity guard).
+	tr.Write("a.txt", "three\n")
+	stdout, stderr, code := runJog(t, tr.Dir, "since", "--at", "@{1}")
+	if code != 0 {
+		t.Fatalf("since --at @{1} exited %d: %s", code, stderr)
+	}
+	if !strings.Contains(stdout, "a.txt") {
+		t.Errorf("expected a.txt in since --at @{1} output:\n%s", stdout)
+	}
+
+	// Positional target: a snap id in the T slot.
+	sha := tr.Git("rev-parse", "--short", "refs/jog/main")
+	tr.Write("a.txt", "four\n")
+	stdout, stderr, code = runJog(t, tr.Dir, "since", sha)
+	if code != 0 {
+		t.Fatalf("since <id> exited %d: %s", code, stderr)
+	}
+	if !strings.Contains(stdout, "since "+sha) || !strings.Contains(stdout, "a.txt") {
+		t.Errorf("positional snap id not honored:\n%s", stdout)
+	}
+
+	// Positional path: exists on disk, so it filters instead of targeting —
+	// the unrelated changed file must not appear.
+	tr.Write("notes.txt", "changed\n")
+	tr.Write("other.txt", "noise\n")
+	stdout, stderr, code = runJog(t, tr.Dir, "since", "notes.txt")
+	if code != 0 {
+		t.Fatalf("since <path> exited %d: %s", code, stderr)
+	}
+	if !strings.Contains(stdout, "notes.txt") || strings.Contains(stdout, "other.txt") {
+		t.Errorf("path filter not honored:\n%s", stdout)
+	}
+
+	// Neither a path nor resolvable: a real error, with the dual-slot hint.
+	_, stderr, code = runJog(t, tr.Dir, "since", "no-such-thing")
+	if code != 1 || !strings.Contains(stderr, "cannot resolve") {
+		t.Errorf("unresolvable positional: code=%d stderr=%q", code, stderr)
+	}
+}
+
+// TestSnapsAll covers matrix row 23: the forest view interleaves every
+// chain with per-chain attribution, and per-chain boundaries keep real
+// history out.
+func TestSnapsAll(t *testing.T) {
+	tr := testrepo.New(t)
+	tr.Write("a.txt", "one\n")
+	tr.Commit("real history commit")
+	runJog(t, tr.Dir, "-m", "on main")
+	tr.Git("checkout", "-q", "-b", "feat")
+	tr.Write("f.txt", "feat\n")
+	runJog(t, tr.Dir, "-m", "on feat")
+
+	stdout, stderr, code := runJog(t, tr.Dir, "snaps", "--all")
+	if code != 0 {
+		t.Fatalf("snaps --all exited %d: %s", code, stderr)
+	}
+	for _, want := range []string{"jog/main", "jog/feat", "manual: on main", "manual: on feat"} {
+		if !strings.Contains(stdout, want) {
+			t.Errorf("forest view missing %q:\n%s", want, stdout)
+		}
+	}
+	if strings.Contains(stdout, "real history commit") {
+		t.Errorf("forest view leaked real history past a chain boundary:\n%s", stdout)
+	}
+}

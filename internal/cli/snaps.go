@@ -16,16 +16,25 @@ import (
 // --name-status or -p supplies the files-changed detail.
 const snapsFormat = "--format=%C(auto,yellow)%h%C(auto,reset)  %C(auto,green)%cr%C(auto,reset)  %s%+b"
 
-// Snaps is `jog snaps [-p] [path…]`: the timeline of the current branch's
-// chain (D5), rendered by real `git log` over the exact snapshot range —
-// exec'd, so git's pager and coloring apply.
+// snapsAllFormat adds the chain each entry belongs to (%S — the ref as
+// spelled on the command line).
+const snapsAllFormat = "--format=%C(auto,yellow)%h%C(auto,reset)  %C(auto,cyan)%S%C(auto,reset)  %C(auto,green)%cr%C(auto,reset)  %s%+b"
+
+// Snaps is `jog snaps [-p] [--all] [path…]`: the timeline of the current
+// branch's chain (D5) — or with --all the whole forest, every chain
+// interleaved by time (plan D13) — rendered by real `git log` over the exact
+// snapshot ranges, exec'd so git's pager and coloring apply.
 func Snaps(args []string) int {
 	patch := false
+	all := false
 	var paths []string
 	for _, a := range args {
-		if a == "-p" || a == "--patch" {
+		switch a {
+		case "-p", "--patch":
 			patch = true
-		} else {
+		case "--all":
+			all = true
+		default:
 			paths = append(paths, a)
 		}
 	}
@@ -46,26 +55,44 @@ func Snaps(args []string) int {
 	// Best-effort; a failure must not block the read.
 	snap.Take(repo, provenance.Pre(strings.TrimSpace("jog snaps "+strings.Join(args, " "))))
 
-	ref, rng, exists, err := chainRange(repo)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "jog: %v\n", err)
-		return 1
-	}
-	if !exists {
-		// Loud empty state: until `doctor` exists, snaps doubles as the
-		// liveness check — silence here could mask a dead engine.
-		fmt.Printf("no snapshots on %s yet — run `jog`, or any git command via the alias\n",
-			strings.TrimPrefix(ref, "refs/jog/"))
-		return 0
+	format := snapsFormat
+	var ranges []string
+	if all {
+		var err error
+		if ranges, err = forestRanges(repo); err != nil {
+			fmt.Fprintf(os.Stderr, "jog: %v\n", err)
+			return 1
+		}
+		if len(ranges) == 0 {
+			fmt.Println("no snapshots anywhere yet — run `jog`, or any git command via the alias")
+			return 0
+		}
+		// %S attributes each entry to the chain it came from, spelled as
+		// passed — forestRanges passes `jog/<branch>` so the label is short.
+		format = snapsAllFormat
+	} else {
+		ref, rng, exists, err := chainRange(repo)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "jog: %v\n", err)
+			return 1
+		}
+		if !exists {
+			// Loud empty state: until `doctor` exists, snaps doubles as the
+			// liveness check — silence here could mask a dead engine.
+			fmt.Printf("no snapshots on %s yet — run `jog`, or any git command via the alias\n",
+				strings.TrimPrefix(ref, "refs/jog/"))
+			return 0
+		}
+		ranges = []string{rng}
 	}
 
-	gitArgs := []string{"log", "--first-parent", snapsFormat}
+	gitArgs := []string{"log", "--first-parent", format}
 	if patch {
 		gitArgs = append(gitArgs, "-p")
 	} else {
 		gitArgs = append(gitArgs, "--name-status")
 	}
-	gitArgs = append(gitArgs, rng)
+	gitArgs = append(gitArgs, ranges...)
 	if len(paths) > 0 {
 		gitArgs = append(gitArgs, "--")
 		gitArgs = append(gitArgs, paths...)
@@ -73,39 +100,72 @@ func Snaps(args []string) int {
 	return execGit(gitArgs)
 }
 
+// forestRanges builds the git log arguments covering every chain: each tip
+// (spelled `jog/<branch>` so %S renders short), plus a `^boundary` per chain
+// so no walk runs off its oldest snapshot into real history. Multi-tip
+// --first-parent follows each chain's own first-parent line and interleaves
+// by commit date (lab-verified, D13).
+func forestRanges(repo *gitx.Repo) ([]string, error) {
+	out, err := repo.RunRead("for-each-ref", "--format=%(refname)", "refs/jog/")
+	if err != nil || out == "" {
+		return nil, err
+	}
+	var args []string
+	var bounds []string
+	for _, ref := range strings.Split(out, "\n") {
+		boundary, err := chainBoundary(repo, ref)
+		if err != nil {
+			return nil, err
+		}
+		args = append(args, "jog/"+strings.TrimPrefix(ref, "refs/jog/"))
+		if boundary != "" {
+			bounds = append(bounds, "^"+boundary)
+		}
+	}
+	return append(args, bounds...), nil
+}
+
 // chainRange resolves the current chain ref and the git range covering
-// exactly its snapshots. The oldest snapshot's parent 1 is a real HEAD
-// commit, so an unbounded --first-parent walk would run off the chain into
-// real history; the boundary is the first commit not committed by the fixed
-// jog identity (D1), and `boundary..ref` excludes it and everything below.
+// exactly its snapshots — `boundary..ref` (see chainBoundary).
 func chainRange(repo *gitx.Repo) (ref, rng string, exists bool, err error) {
 	ref = chainRef(repo)
 	if _, verr := repo.RunRead("rev-parse", "-q", "--verify", ref); verr != nil {
 		return ref, "", false, nil
 	}
-
-	cmd, out, err := repo.StartRead("log", "--first-parent", "--format=%H %ce", ref)
+	boundary, err := chainBoundary(repo, ref)
 	if err != nil {
 		return "", "", false, err
-	}
-	defer func() {
-		cmd.Process.Kill() // walk terminated early; the rest is real history
-		cmd.Wait()
-	}()
-	boundary := ""
-	scanner := bufio.NewScanner(out)
-	for scanner.Scan() {
-		hash, email, _ := strings.Cut(scanner.Text(), " ")
-		if email != snap.IdentityEmail {
-			boundary = hash
-			break
-		}
 	}
 	rng = ref
 	if boundary != "" {
 		rng = boundary + ".." + ref
 	}
 	return ref, rng, true, nil
+}
+
+// chainBoundary finds where a chain's snapshots end and real history begins.
+// The oldest snapshot's parent 1 is a real HEAD commit, so an unbounded
+// --first-parent walk would run off the chain; the boundary is the first
+// commit not committed by the fixed jog identity (D1). Empty when the chain
+// bottoms out without one (unborn-HEAD root). Streamed and killed early —
+// the walk below the boundary is the repo's whole history.
+func chainBoundary(repo *gitx.Repo, ref string) (string, error) {
+	cmd, out, err := repo.StartRead("log", "--first-parent", "--format=%H %ce", ref)
+	if err != nil {
+		return "", err
+	}
+	defer func() {
+		cmd.Process.Kill()
+		cmd.Wait()
+	}()
+	scanner := bufio.NewScanner(out)
+	for scanner.Scan() {
+		hash, email, _ := strings.Cut(scanner.Text(), " ")
+		if email != snap.IdentityEmail {
+			return hash, nil
+		}
+	}
+	return "", nil
 }
 
 // chainRef resolves the current branch's chain ref (refs/jog/<branch>, or
