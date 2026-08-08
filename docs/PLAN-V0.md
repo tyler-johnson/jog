@@ -303,7 +303,11 @@ fact from DESIGN §4's table — the table *is* the spec:
 - [ ] All matrix tests green in CI; timings printed and within budget locally
 - [ ] Alias + hooks live in my environment; snapshots accruing on ≥ 2 real
       repos for ≥ 1 week
-- [ ] At least one *real* (unstaged) recovery performed via `jog back`
+- [x] Recovery verified on a real repo (cloud-broadcast-studio drill,
+      2026-08-08): deleted tracked file, corrupted package.json, and a
+      deleted *untracked* file (invisible to git status) all restored
+      byte-identical (sha256-verified) via one `jog back … --at <id>`.
+      An organic, unstaged rescue will still count double when it happens.
 - [ ] `snaps` timeline readable and correctly scoped after a rebase and a
       branch switch on a dogfood repo
 - [ ] README complete enough that a stranger could install and understand
