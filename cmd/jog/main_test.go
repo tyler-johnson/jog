@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -34,8 +35,14 @@ func TestMain(m *testing.M) {
 
 func runJog(t *testing.T, dir string, args ...string) (stdout, stderr string, code int) {
 	t.Helper()
+	return runJogStdin(t, dir, "", args...)
+}
+
+func runJogStdin(t *testing.T, dir, stdin string, args ...string) (stdout, stderr string, code int) {
+	t.Helper()
 	cmd := exec.Command(jogBin, args...)
 	cmd.Dir = dir
+	cmd.Stdin = strings.NewReader(stdin)
 	cmd.Env = append(os.Environ(),
 		"GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_SYSTEM=/dev/null",
 		"GIT_AUTHOR_NAME=test", "GIT_AUTHOR_EMAIL=test@example.com",
@@ -162,6 +169,40 @@ func TestHelpPassesThrough(t *testing.T) {
 	if code != 0 || !strings.Contains(stdout, "usage: git") {
 		t.Errorf("git help: code=%d stdout=%q...", code, stdout[:min(80, len(stdout))])
 	}
+}
+
+// Hook entry points always exit 0 (row 18) — misconfigured invocations
+// included, since a non-zero exit would block the user's tool call.
+func TestHookAlwaysExitsZero(t *testing.T) {
+	tr := testrepo.New(t)
+	tr.Write("a.txt", "x\n")
+	tr.Commit("first")
+	tr.Write("b.txt", "y\n")
+
+	json := `{"hook_event_name":"PreToolUse","session_id":"e2e-sess-id","cwd":` +
+		strconvQuote(tr.Dir) + `,"tool_name":"Bash","tool_input":{"command":"make build"}}`
+	stdout, _, code := runJogStdin(t, tr.Dir, json, "hook", "claude")
+	if code != 0 || stdout != "" {
+		t.Errorf("hook claude: code=%d stdout=%q (stdout must stay empty)", code, stdout)
+	}
+	if got := tr.Git("log", "-1", "--format=%s", "refs/jog/main"); got != "claude[e2e-sess]: Bash(make build)" {
+		t.Errorf("provenance = %q", got)
+	}
+
+	if _, _, code := runJogStdin(t, tr.Dir, "garbage", "hook", "claude"); code != 0 {
+		t.Errorf("hook claude with garbage stdin exited %d", code)
+	}
+	if _, _, code := runJog(t, tr.Dir, "hook"); code != 0 {
+		t.Errorf("bare `jog hook` exited %d", code)
+	}
+	if _, _, code := runJog(t, tr.Dir, "hook", "unknown-adapter"); code != 0 {
+		t.Errorf("`jog hook unknown-adapter` exited %d", code)
+	}
+}
+
+func strconvQuote(s string) string {
+	b, _ := json.Marshal(s)
+	return string(b)
 }
 
 func TestReservedVerbStub(t *testing.T) {

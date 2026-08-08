@@ -37,7 +37,13 @@ func run(args []string) int {
 	case "back":
 		return notImplemented("back", "M6")
 	case "hook":
-		return notImplemented("hook", "M4")
+		// Everything under `jog hook` exits 0, even misconfiguration — a
+		// non-zero exit from a hook blocks the user's tool call or prompt.
+		if len(args) >= 2 && args[1] == "claude" {
+			return cli.HookClaude(os.Stdin)
+		}
+		fmt.Fprintln(os.Stderr, "jog: unknown hook adapter (want: jog hook claude)")
+		return 0
 	case "since", "pick", "trim", "mcp", "doctor":
 		fmt.Fprintf(os.Stderr, "jog: %q is reserved for a future release (see docs/PLAN-V0.md)\n", args[0])
 		return 1
