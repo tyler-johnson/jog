@@ -30,11 +30,12 @@ usage:
   jog back --all --at T     restore the whole working tree
   jog hook claude           Claude Code hook entry point (reads JSON on stdin)
   jog git <args>            snapshot, then run the real git command
+  jog pick [--all] <path>   scrub through a file's versions and restore one
   jog trim [--dry-run]      apply the retention taper; drop thinned snapshots
   jog doctor [--fix]        verify invariants, wiring, and liveness
   jog version               print jog's version
 
-reserved for future releases: pick, mcp
+reserved for future releases: mcp
 
 Install the alias so every git command snapshots first:
   alias git='jog git'
@@ -72,11 +73,13 @@ func run(args []string) int {
 		}
 		fmt.Fprintln(os.Stderr, "jog: unknown hook adapter (want: jog hook claude)")
 		return 0
+	case "pick":
+		return cli.Pick(args[1:])
 	case "trim":
 		return cli.Trim(args[1:])
 	case "doctor":
 		return cli.Doctor(args[1:])
-	case "pick", "mcp":
+	case "mcp":
 		fmt.Fprintf(os.Stderr, "jog: %q is not available yet — it is reserved for a future release\n", args[0])
 		return 1
 	case "-h", "--help", "help":

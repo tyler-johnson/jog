@@ -122,6 +122,7 @@ Two disjoint namespaces, one rule: **`jog git` is the only door to git.**
 | `jog back <path>… [--at T]` | restore files from a snapshot (worktree only) |
 | `jog back --all [--at T]` | restore the whole tree, including deleting files created since |
 | `jog git <args>` | snapshot, then run the real git command — what the alias expands to |
+| `jog pick [--all] <path>` | scrub through a file's versions — list, preview, enter to restore (`q` leaves everything untouched) |
 | `jog trim [--dry-run]` | apply the retention taper; the previous tip stays at `refs/jog/@trash/<branch>` until the next trim |
 | `jog doctor [--fix]` | verify invariants, wiring, and liveness (`--fix` repairs the gc config) |
 | `jog version` | print jog's version |
@@ -136,7 +137,7 @@ ahead of**, never who made the changes. Manual edits swept up by an
 agent-triggered snapshot are attributed to that trigger — jog can't know who
 typed between boundaries, and refuses to guess.
 
-`pick` and `mcp` are reserved for future releases.
+`mcp` is reserved for a future release.
 Anything else is an error — jog never guesses.
 
 ## Recovery cookbook

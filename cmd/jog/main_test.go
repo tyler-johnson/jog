@@ -454,9 +454,9 @@ func strconvQuote(s string) string {
 
 func TestReservedVerbStub(t *testing.T) {
 	dir := t.TempDir()
-	_, stderr, code := runJog(t, dir, "pick")
+	_, stderr, code := runJog(t, dir, "mcp")
 	if code != 1 || !strings.Contains(stderr, "reserved") {
-		t.Errorf("pick stub: code=%d stderr=%q", code, stderr)
+		t.Errorf("mcp stub: code=%d stderr=%q", code, stderr)
 	}
 }
 
@@ -845,5 +845,41 @@ func TestTrim(t *testing.T) {
 	stdout, _, _ = runJog(t, tr.Dir, "trim")
 	if !strings.Contains(stdout, "nothing to trim") {
 		t.Errorf("second trim not idempotent:\n%s", stdout)
+	}
+}
+
+// TestPick covers matrix row 31's e2e face: without a TTY the version list
+// prints plainly — the same rows the TUI shows — restricted to snapshots
+// that actually changed the file, and it must agree with `jog snaps <path>`.
+func TestPick(t *testing.T) {
+	tr := testrepo.New(t)
+	tr.Write("a.txt", "one\n")
+	tr.Write("other.txt", "x\n")
+	tr.Commit("base")
+	runJog(t, tr.Dir, "-m", "touches a")
+	tr.Write("other.txt", "y\n")
+	runJog(t, tr.Dir, "-m", "touches other only")
+	tr.Write("a.txt", "two\n")
+	runJog(t, tr.Dir, "-m", "touches a again")
+
+	stdout, stderr, code := runJog(t, tr.Dir, "pick", "a.txt")
+	if code != 0 {
+		t.Fatalf("pick exited %d: %s", code, stderr)
+	}
+	if !strings.Contains(stdout, "touches a again") || !strings.Contains(stdout, "manual: touches a") {
+		t.Errorf("pick list missing a.txt versions:\n%s", stdout)
+	}
+	if strings.Contains(stdout, "touches other only") {
+		t.Errorf("pick listed a snapshot that did not change the file:\n%s", stdout)
+	}
+
+	stdout, _, _ = runJog(t, tr.Dir, "pick", "missing.txt")
+	if !strings.Contains(stdout, "no snapshots touch") {
+		t.Errorf("pick on untouched path:\n%s", stdout)
+	}
+
+	_, stderr, code = runJog(t, tr.Dir, "pick")
+	if code != 2 || !strings.Contains(stderr, "usage") {
+		t.Errorf("pick without path: code=%d stderr=%q", code, stderr)
 	}
 }

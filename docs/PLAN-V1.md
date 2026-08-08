@@ -186,21 +186,30 @@ repos (all snapshots inside keep-all; correctly nothing to drop).
       manual-only until ≥ 2 weeks of dogfood; the checklist item below
       carries it.
 
-### M12 — `jog pick` (M)
+### M12 — `jog pick` (M) — ✅ done 2026-08-08 (interactive drill pending)
 
-- [ ] `jog pick <path>`: Bubble Tea list of the file's versions across the
-      current chain (snap id, age, provenance — same vocabulary as `snaps`),
-      preview pane showing the diff between adjacent versions, enter →
-      restore via the existing `back` machinery (which snapshots first, so
-      picking is undoable for free). `q` leaves the worktree untouched.
-- [ ] `pick --all`: same, across every chain (the forest, matching
-      `snaps --all` scope).
-- [ ] Scope discipline (D20): v1 pick is a *file-version scrubber*, not a
-      repo browser — no tree navigation, no multi-file restore, no graph
-      rendering. Those wait for evidence from dogfood.
-- [ ] TUI layer stays thin: version-list assembly and diff extraction live
-      in `internal/cli`/`internal/snap` as plain functions with plain tests;
-      `internal/tui` only renders. TUI itself gets a smoke test at most.
+- [x] `jog pick <path>`: Bubble Tea list of the file's versions (snap id,
+      age, provenance — `snaps` vocabulary), preview pane, enter → restore
+      via the existing `back` machinery (pre-restore snapshot + undo hint
+      for free), `q` backs out untouched. `--all` spans every chain via
+      the same ranges `snaps --all` uses, so the views always agree.
+      Without a TTY the version list prints plainly (pipeable, and the
+      e2e-testable face of the data layer).
+- [x] **Preview gotcha:** snapshots are two-parent commits, so plain
+      `git show` renders a combined (`--cc`) diff against both parents —
+      which also *hides* files that match either parent.
+      `log --first-parent -p` diffs against the previous snapshot only.
+- [x] Scope discipline held (D20): file scrubber only. Dependency surface:
+      Bubble Tea alone (list + reverse-video cursor hand-rolled; no
+      lipgloss/bubbles), confined to `internal/tui`; engine and every
+      other verb remain stdlib-only.
+- [x] Row 31: data layer (`fileVersions`, first-parent preview) tested in
+      package cli; e2e covers non-TTY listing, path filtering, empty and
+      usage cases. TUI boot smoke-tested under a pty (alt-screen enter +
+      first render confirmed; the fake pty can't answer terminal queries,
+      so the interactive loop is verified by hand instead).
+- [ ] Interactive drill on a real terminal (Tyler): scrub + restore + undo
+      once in anger — the exit-checklist item carries it.
 
 ### M13 — release channel (S/M)
 
