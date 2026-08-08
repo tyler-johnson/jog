@@ -58,16 +58,19 @@ Milestones are sequential; each lands with its tests. Dogfood begins at M4.
       after it — build it first, not per-test. Host git config is masked
       (`GIT_CONFIG_GLOBAL=/dev/null`) so tests behave identically everywhere.
 
-### M1 — git layer (S)
+### M1 — git layer (S) — ✅ done
 
-- [ ] Repo discovery via `git rev-parse --absolute-git-dir` (worktree-aware:
+- [x] Repo discovery via `git rev-parse --absolute-git-dir` (worktree-aware:
       in a linked worktree this returns `.git/worktrees/<name>`, so the shadow
       index at `$GIT_DIR/jog/index` is naturally per-worktree — no sharing, no
-      collisions; matches DESIGN §3 worktree story)
-- [ ] Run helpers: `Run` (captured), `RunRead` (adds `--no-optional-locks`),
-      env override support for `GIT_INDEX_FILE`
-- [ ] Not-a-repo detection distinguished from other failures (hooks need
-      silent exit 0; user commands need a real error)
+      collisions; matches DESIGN §3 worktree story). Also detects bare repos
+      (nothing to snapshot there).
+- [x] Run helpers: `Run` (captured), `RunRead` (adds `--no-optional-locks`),
+      `WithIndex` for `GIT_INDEX_FILE` shadow ops (absolute paths enforced —
+      relative resolves inside the worktree, per the verified gotcha)
+- [x] Not-a-repo detection distinguished from other failures (hooks need
+      silent exit 0; user commands need a real error): `ErrNotARepo` sentinel
+      vs `*GitError` with exit code + stderr
 
 ### M2 — snapshot engine (L, the core)
 
