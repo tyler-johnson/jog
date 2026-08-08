@@ -174,7 +174,7 @@ func TestHookIronRule(t *testing.T) {
 	tr := setup(t)
 
 	hook(t, "this is not json {{{")
-	hook(t, "") // empty stdin
+	hook(t, "")                        // empty stdin
 	hook(t, payload(t, map[string]any{ // cwd outside any repo
 		"hook_event_name": "PreToolUse",
 		"cwd":             t.TempDir(),

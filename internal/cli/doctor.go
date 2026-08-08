@@ -55,7 +55,7 @@ func Doctor(args []string) int {
 	if repo != nil {
 		d.checkRepo(repo, fix)
 	}
-	d.checkTriggers()
+	d.checkTriggers(repo)
 
 	if d.findings == 0 {
 		fmt.Println("\nno findings — the net is under you")
@@ -182,24 +182,47 @@ func (d *doctor) checkRepo(repo *gitx.Repo, fix bool) {
 // can't see a live shell's aliases, so it is reported, never asserted).
 // Neither wired at all is the real finding: a silent engine feels safe
 // while capturing nothing.
-func (d *doctor) checkTriggers() {
+func (d *doctor) checkTriggers(repo *gitx.Repo) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		d.info("triggers", "cannot resolve home directory; wiring checks skipped")
 		return
 	}
 
-	hooks := claudeHooksWired(filepath.Join(home, ".claude", "settings.json"))
-	if hooks {
-		d.ok("claude hooks", "`jog hook claude` wired in ~/.claude/settings.json")
-	} else {
-		d.info("claude hooks", "not wired in ~/.claude/settings.json")
+	// User scope first, then the project's shared and personal settings —
+	// wherever the user chose to wire, doctor should find it.
+	settings := []struct{ path, label string }{
+		{filepath.Join(home, ".claude", "settings.json"), "~/.claude/settings.json"},
+	}
+	var top string
+	if repo != nil {
+		if t, err := repo.Run("rev-parse", "--show-toplevel"); err == nil {
+			top = t
+			settings = append(settings,
+				struct{ path, label string }{filepath.Join(top, ".claude", "settings.json"), ".claude/settings.json"},
+				struct{ path, label string }{filepath.Join(top, ".claude", "settings.local.json"), ".claude/settings.local.json"},
+			)
+		}
+	}
+	hooks := false
+	for _, s := range settings {
+		if claudeHooksWired(s.path) {
+			d.ok("claude hooks", "`jog hook claude` wired in "+s.label)
+			hooks = true
+			break
+		}
+	}
+	if !hooks {
+		d.info("claude hooks", "not wired — `jog hook claude install` sets them up")
 	}
 
-	if claudeSkillInstalled(home) {
+	switch {
+	case claudeSkillInstalled(home):
 		d.ok("claude skill", "installed at ~/.claude/skills/jog/SKILL.md")
-	} else {
-		d.info("claude skill", "not installed — `jog skill claude` teaches agents the recovery workflow")
+	case top != "" && fileExists(filepath.Join(top, ".claude", "skills", "jog", "SKILL.md")):
+		d.ok("claude skill", "installed at .claude/skills/jog/SKILL.md (project)")
+	default:
+		d.info("claude skill", "not installed — `jog skill claude install` teaches agents the recovery workflow")
 	}
 
 	aliasFile := ""
@@ -217,8 +240,13 @@ func (d *doctor) checkTriggers() {
 	}
 
 	if !hooks && aliasFile == "" {
-		d.warn("triggers", "neither the alias nor Claude hooks are wired — snapshots only happen when you run `jog` by hand (see README install steps 2–3)")
+		d.warn("triggers", "neither the alias nor Claude hooks are wired — snapshots only happen when you run `jog` by hand (`jog hook claude install`, or add the alias)")
 	}
+}
+
+func fileExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
 }
 
 // claudeHooksWired reports whether any hook command in the settings file

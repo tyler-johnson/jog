@@ -29,7 +29,8 @@ usage:
   jog back <path> [--at T]  restore one file from a snapshot
   jog back --all --at T     restore the whole working tree
   jog hook claude           Claude Code hook entry point (reads JSON on stdin)
-  jog skill claude          install the Claude Code skill (--print: to stdout)
+  jog hook claude install   wire the hooks into Claude Code settings (uninstall reverses; --project: this repo)
+  jog skill claude install  install the Claude Code skill (uninstall, --print; --project: this repo)
   jog git <args>            snapshot, then run the real git command
   jog pick [--all] <path>   scrub through a file's versions and restore one
   jog trim [--dry-run]      apply the retention taper; drop thinned snapshots
@@ -67,10 +68,15 @@ func run(args []string) int {
 	case "back":
 		return cli.Back(args[1:])
 	case "hook":
-		// Everything under `jog hook` exits 0, even misconfiguration — a
-		// non-zero exit from a hook blocks the user's tool call or prompt.
+		// The runtime entry (`jog hook claude`, JSON on stdin) exits 0
+		// always, even on misconfiguration — a non-zero exit from a hook
+		// blocks the user's tool call or prompt. The install/uninstall
+		// subcommands are human-invoked and error normally.
 		if len(args) >= 2 && args[1] == "claude" {
-			return cli.HookClaude(os.Stdin, os.Stdout)
+			if len(args) == 2 {
+				return cli.HookClaude(os.Stdin, os.Stdout)
+			}
+			return cli.HookSetup(args[2:])
 		}
 		fmt.Fprintln(os.Stderr, "jog: unknown hook adapter (want: jog hook claude)")
 		return 0

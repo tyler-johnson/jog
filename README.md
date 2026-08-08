@@ -92,9 +92,17 @@ Scripts, IDEs, and CI are untouched — they resolve `git` on PATH and get real
 git. That's a feature: jog stays out of every code path that expects exact
 git behavior.
 
-**3. Wire up Claude Code** (optional) — user-level `~/.claude/settings.json`
-covers every repo with zero per-repo setup; the hook exits in milliseconds
-outside git repos and never blocks a tool call:
+**3. Wire up Claude Code** (optional):
+
+```sh
+jog hook claude install    # hooks: snapshot before every prompt and tool call
+jog skill claude install   # skill: teach agents the recovery workflow
+```
+
+The hooks land in user-level `~/.claude/settings.json` — one wiring covers
+every repo; the hook exits in milliseconds outside git repos and never
+blocks a tool call. Install writes exactly this (paste it yourself if you
+prefer):
 
 ```json
 {
@@ -110,17 +118,20 @@ outside git repos and never blocks a tool call:
 }
 ```
 
-(If `~/go/bin` isn't on your PATH for non-interactive shells, use the
-absolute path, e.g. `/home/you/go/bin/jog hook claude`.)
+(If jog isn't on PATH for non-interactive shells, install writes the
+absolute path instead — and tells you so.)
+
+`--project` scopes either command to the current repo: hooks go to the
+personal `.claude/settings.local.json` (a committed hook command would
+break for teammates without jog), the skill to the committable
+`.claude/skills/`. `uninstall` reverses exactly what install wrote and
+touches nothing else.
 
 Once the hooks are wired, jog introduces itself to Claude once per session
 — a single line of context saying snapshots are live and how to restore —
-so the agent knows the safety net exists exactly when it's active. To go
-further, install the skill that teaches agents the full recovery workflow:
-
-```sh
-jog skill claude    # writes ~/.claude/skills/jog/SKILL.md
-```
+so the agent knows the safety net exists exactly when it's active. The
+skill (`~/.claude/skills/jog/SKILL.md`) goes further and teaches the full
+recovery workflow.
 
 **4. Verify:** make any change in a repo, run `git status`, then `jog snaps`
 — you should see a `pre: git status` entry.
@@ -141,7 +152,8 @@ Two disjoint namespaces, one rule: **`jog git` is the only door to git.**
 | `jog pick [--all] <path>` | scrub through a file's versions — list, preview, enter to restore (`q` leaves everything untouched) |
 | `jog trim [--dry-run]` | apply the retention taper; the previous tip stays at `refs/jog/@trash/<branch>` until the next trim |
 | `jog doctor [--fix]` | verify invariants, wiring, and liveness (`--fix` repairs the gc config) |
-| `jog skill claude` | install the Claude Code skill that teaches agents the recovery workflow (`--print`: to stdout) |
+| `jog hook claude install` | wire the Claude Code hooks (`uninstall` reverses it; `--project`: this repo only) |
+| `jog skill claude install` | install the Claude Code skill that teaches agents the recovery workflow (`uninstall`, `--print`; `--project`: this repo) |
 | `jog version` | print jog's version |
 
 `--at` (and `since`'s target slot) accepts a snap id from `jog snaps` or
