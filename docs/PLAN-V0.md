@@ -72,26 +72,28 @@ Milestones are sequential; each lands with its tests. Dogfood begins at M4.
       silent exit 0; user commands need a real error): `ErrNotARepo` sentinel
       vs `*GitError` with exit code + stderr
 
-### M2 — snapshot engine (L, the core)
+### M2 — snapshot engine (L, the core) — ✅ done
 
-- [ ] §4 recipe in Go: branch → ref resolution (incl. `@detached`), seed-once
+- [x] §4 recipe in Go: branch → ref resolution (incl. `@detached`), seed-once
       shadow index, `add -A` with `advice.addEmbeddedRepo=false`, `write-tree`,
       no-op tree compare, `commit-tree` with parent-1 = prev snap /
       parent-2 = HEAD, unborn-HEAD branch, `update-ref --create-reflog` CAS
-- [ ] Fixed snapshot identity: author+committer `jog <jog@local>`. This is
+      (empty old value on creation = "must not exist")
+- [x] Fixed snapshot identity: author+committer `jog <jog@local>`. This is
       load-bearing, not cosmetic — see M5 (first-parent walk termination).
-- [ ] Sparse-checkout detection (`core.sparseCheckout`) → re-seed from HEAD
+- [x] Sparse-checkout detection (`core.sparseCheckout`) → re-seed from HEAD
       each snapshot on those repos (accept cost, per verified gotcha)
-- [ ] `jog.maxFileSize` guard (default 50 MiB) — approach in §4 below
-- [ ] Shadow-index contention policy: concurrent snapshots serialize on git's
+- [x] `jog.maxFileSize` guard (default 50 MiB) — approach in §4 below;
+      skipped list recorded in the commit message body
+- [x] Shadow-index contention policy: concurrent snapshots serialize on git's
       own `<shadow>.lock`. On lock failure: one short retry (~50 ms), then
       **skip the snapshot** (never block, never fail the wrapped command; the
       concurrent winner captured a near-identical tree). CAS already protects
-      the ref.
-- [ ] Lazy per-repo gc config: on first creation of a `refs/jog/*` ref, set
+      the ref. Both contention paths report `Contended`, not an error.
+- [x] Lazy per-repo gc config: on first creation of a `refs/jog/*` ref, set
       `gc.refs/jog/*.reflogExpire=never` + `.reflogExpireUnreachable=never`
       (decision D3 below)
-- [ ] Test matrix: §5 of this plan
+- [x] Test matrix rows 1–14, 19, 20 (15–18 land with their milestones)
 
 ### M3 — CLI dispatch + passthrough (M)
 
@@ -230,6 +232,13 @@ fact from DESIGN §4's table — the table *is* the spec:
 
 - **Engine perf regressions are silent** — the ~30× re-seed cliff only shows
   up as sluggishness. Mitigation: test 20 prints timings in CI from day one.
+- **Perf finding (M2, 2026-08-08):** warm no-op ≈ 51 ms on a 2k-file repo on
+  the Pi 5, vs an 11.5 ms `git status` baseline — ratio 4.4× where the budget
+  implies ~1.3×. Dominated by the D2 status pre-scan (a second full tree
+  walk) plus ~9 subprocess spawns per snapshot. Consolidation candidates,
+  deferred until after dogfood: merge the two `config` reads into one
+  `--get-regexp` spawn; combine rev-parse calls; make the oversize pre-scan
+  conditional or persisted. Architecture is right; this is spawn arithmetic.
 - **Hook payload drift** — Claude Code hook JSON is external surface; parse
   defensively (unknown fields ignored, missing fields → generic provenance,
   never non-zero exit).

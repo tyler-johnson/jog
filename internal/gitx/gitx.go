@@ -70,9 +70,13 @@ func (r *Repo) Run(args ...string) (string, error) {
 	cmd.Stderr = &stderr
 	err := cmd.Run()
 	if err != nil {
+		code := -1 // start failure (e.g. git not on PATH); no exit code exists
+		if cmd.ProcessState != nil {
+			code = cmd.ProcessState.ExitCode()
+		}
 		return "", &GitError{
 			Args:     args,
-			ExitCode: cmd.ProcessState.ExitCode(),
+			ExitCode: code,
 			Stderr:   strings.TrimSpace(stderr.String()),
 			cause:    err,
 		}
