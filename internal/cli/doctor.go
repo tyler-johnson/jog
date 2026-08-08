@@ -196,6 +196,12 @@ func (d *doctor) checkTriggers() {
 		d.info("claude hooks", "not wired in ~/.claude/settings.json")
 	}
 
+	if claudeSkillInstalled(home) {
+		d.ok("claude skill", "installed at ~/.claude/skills/jog/SKILL.md")
+	} else {
+		d.info("claude skill", "not installed — `jog skill claude` teaches agents the recovery workflow")
+	}
+
 	aliasFile := ""
 	for _, rc := range []string{".bashrc", ".zshrc", ".config/fish/config.fish", ".profile"} {
 		b, err := os.ReadFile(filepath.Join(home, rc))

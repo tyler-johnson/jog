@@ -637,7 +637,8 @@ func TestDoctor(t *testing.T) {
 	if code != 0 {
 		t.Errorf("healthy repo: code=%d\n%s", code, stdout)
 	}
-	if !strings.Contains(stdout, "no findings") || !strings.Contains(stdout, "claude hooks") {
+	if !strings.Contains(stdout, "no findings") || !strings.Contains(stdout, "claude hooks") ||
+		!strings.Contains(stdout, "claude skill") {
 		t.Errorf("healthy output:\n%s", stdout)
 	}
 
@@ -881,5 +882,43 @@ func TestPick(t *testing.T) {
 	_, stderr, code = runJog(t, tr.Dir, "pick")
 	if code != 2 || !strings.Contains(stderr, "usage") {
 		t.Errorf("pick without path: code=%d stderr=%q", code, stderr)
+	}
+}
+
+// TestSkill: `jog skill claude` installs the Claude Code skill under HOME,
+// is idempotent, prints with --print, and rejects unknown adapters.
+func TestSkill(t *testing.T) {
+	home := t.TempDir()
+	env := []string{"HOME=" + home}
+	dir := t.TempDir()
+	path := filepath.Join(home, ".claude", "skills", "jog", "SKILL.md")
+
+	stdout, _, code := runJogEnv(t, dir, env, "skill", "claude")
+	if code != 0 || !strings.Contains(stdout, "installed") {
+		t.Fatalf("install: code=%d\n%s", code, stdout)
+	}
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := string(b)
+	if !strings.HasPrefix(content, "---\n") || !strings.Contains(content, "name: jog") ||
+		!strings.Contains(content, "description:") {
+		t.Errorf("skill missing frontmatter:\n%.200s", content)
+	}
+
+	stdout, _, code = runJogEnv(t, dir, env, "skill", "claude")
+	if code != 0 || !strings.Contains(stdout, "up to date") {
+		t.Errorf("reinstall: code=%d\n%s", code, stdout)
+	}
+
+	printed, _, code := runJogEnv(t, dir, env, "skill", "--print", "claude")
+	if code != 0 || printed != content {
+		t.Errorf("--print: code=%d, output differs from installed file", code)
+	}
+
+	_, stderr, code := runJogEnv(t, dir, env, "skill", "codex")
+	if code != 2 || !strings.Contains(stderr, "adapter") {
+		t.Errorf("unknown adapter: code=%d stderr=%q", code, stderr)
 	}
 }

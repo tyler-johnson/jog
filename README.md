@@ -113,6 +113,15 @@ outside git repos and never blocks a tool call:
 (If `~/go/bin` isn't on your PATH for non-interactive shells, use the
 absolute path, e.g. `/home/you/go/bin/jog hook claude`.)
 
+Once the hooks are wired, jog introduces itself to Claude once per session
+— a single line of context saying snapshots are live and how to restore —
+so the agent knows the safety net exists exactly when it's active. To go
+further, install the skill that teaches agents the full recovery workflow:
+
+```sh
+jog skill claude    # writes ~/.claude/skills/jog/SKILL.md
+```
+
 **4. Verify:** make any change in a repo, run `git status`, then `jog snaps`
 — you should see a `pre: git status` entry.
 
@@ -132,6 +141,7 @@ Two disjoint namespaces, one rule: **`jog git` is the only door to git.**
 | `jog pick [--all] <path>` | scrub through a file's versions — list, preview, enter to restore (`q` leaves everything untouched) |
 | `jog trim [--dry-run]` | apply the retention taper; the previous tip stays at `refs/jog/@trash/<branch>` until the next trim |
 | `jog doctor [--fix]` | verify invariants, wiring, and liveness (`--fix` repairs the gc config) |
+| `jog skill claude` | install the Claude Code skill that teaches agents the recovery workflow (`--print`: to stdout) |
 | `jog version` | print jog's version |
 
 `--at` (and `since`'s target slot) accepts a snap id from `jog snaps` or
@@ -276,8 +286,8 @@ Native `git config` keys — global or per-repo, no new file format:
 ## Roadmap
 
 - **shipped:** snapshot engine, `snaps` (+ `--all` forest view), `since`,
-  `back`, `pick`, `trim` + tapering retention, `doctor`, Claude Code hooks,
-  brew tap.
+  `back`, `pick`, `trim` + tapering retention, `doctor`, Claude Code
+  integration (hooks, agent skill, once-per-session notice), brew tap.
 - **next:** automatic trim (piggybacked, at most daily — after the manual
   command has earned trust), MCP server (agents query their own snapshot
   history), optional encrypted backup push of `refs/jog/*` to a private

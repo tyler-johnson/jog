@@ -30,11 +30,13 @@ func payload(t *testing.T, fields map[string]any) string {
 	return string(b)
 }
 
-func hook(t *testing.T, stdin string) {
+func hook(t *testing.T, stdin string) string {
 	t.Helper()
-	if code := HookClaude(strings.NewReader(stdin)); code != 0 {
+	var out strings.Builder
+	if code := HookClaude(strings.NewReader(stdin), &out); code != 0 {
 		t.Fatalf("HookClaude exited %d — the iron rule is exit 0, always", code)
 	}
+	return out.String()
 }
 
 func subject(tr *testrepo.Repo) string {
@@ -118,6 +120,51 @@ func TestHookUnknownToolDegrades(t *testing.T) {
 	}))
 	if got := subject(tr); got != "claude[b3f1a2c4]: SomeFutureTool" {
 		t.Errorf("subject = %q", got)
+	}
+}
+
+// The session notice reaches Claude's context via UserPromptSubmit stdout:
+// once per session per repo, never on PreToolUse (whose stdout is not
+// injected), and never without a session id to dedupe on.
+func TestHookSessionNotice(t *testing.T) {
+	tr := setup(t)
+	prompt := func(session, text string) string {
+		t.Helper()
+		tr.Write("b.txt", text+"\n") // keep each snapshot distinct
+		fields := map[string]any{
+			"hook_event_name": "UserPromptSubmit",
+			"cwd":             tr.Dir,
+			"prompt":          text,
+		}
+		if session != "" {
+			fields["session_id"] = session
+		}
+		return hook(t, payload(t, fields))
+	}
+
+	if out := prompt("s1", "first"); !strings.Contains(out, "[jog]") {
+		t.Errorf("first prompt of session: want notice, got %q", out)
+	}
+	if out := prompt("s1", "second"); out != "" {
+		t.Errorf("same session again: want silence, got %q", out)
+	}
+	if out := prompt("s2", "third"); !strings.Contains(out, "[jog]") {
+		t.Errorf("new session: want notice again, got %q", out)
+	}
+	if out := prompt("", "fourth"); out != "" {
+		t.Errorf("no session id: want silence (cannot dedupe), got %q", out)
+	}
+
+	tr.Write("b.txt", "pre\n")
+	out := hook(t, payload(t, map[string]any{
+		"hook_event_name": "PreToolUse",
+		"session_id":      "s3",
+		"cwd":             tr.Dir,
+		"tool_name":       "Bash",
+		"tool_input":      map[string]any{"command": "ls"},
+	}))
+	if out != "" {
+		t.Errorf("PreToolUse: stdout is not context-injected, want empty, got %q", out)
 	}
 }
 
