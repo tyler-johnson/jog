@@ -38,6 +38,14 @@ func runJog(t *testing.T, dir string, args ...string) (stdout, stderr string, co
 	return runJogStdin(t, dir, "", args...)
 }
 
+// runJogAsGit invokes jog the way the alias does (JOG_AS_GIT=1).
+func runJogAsGit(t *testing.T, dir string, args ...string) (stdout, stderr string, code int) {
+	t.Helper()
+	t.Setenv("JOG_AS_GIT", "1")
+	defer os.Unsetenv("JOG_AS_GIT")
+	return runJogStdin(t, dir, "", args...)
+}
+
 func runJogStdin(t *testing.T, dir, stdin string, args ...string) (stdout, stderr string, code int) {
 	t.Helper()
 	cmd := exec.Command(jogBin, args...)
@@ -176,12 +184,32 @@ func TestHelp(t *testing.T) {
 		}
 	}
 
-	cmd := exec.Command(jogBin, "help")
-	cmd.Dir = dir
-	cmd.Env = append(os.Environ(), "JOG_AS_GIT=1", "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_SYSTEM=/dev/null")
-	out, err := cmd.Output()
-	if err != nil || !strings.Contains(string(out), "usage: git") {
-		t.Errorf("aliased git help: err=%v stdout=%q...", err, string(out[:min(80, len(out))]))
+	stdout, _, code := runJogAsGit(t, dir, "help")
+	if code != 0 || !strings.Contains(stdout, "usage: git") {
+		t.Errorf("aliased git help: code=%d stdout=%q...", code, stdout[:min(80, len(stdout))])
+	}
+}
+
+// D9: typed as `git`, jog verbs don't exist — everything passes through to
+// real git, still snapshotting causally first.
+func TestAsGitIsPurePassthrough(t *testing.T) {
+	tr := testrepo.New(t)
+	tr.Write("a.txt", "x\n")
+	tr.Commit("first")
+	tr.Write("b.txt", "y\n")
+
+	_, stderr, code := runJogAsGit(t, tr.Dir, "snaps")
+	if code == 0 || !strings.Contains(stderr, "'snaps' is not a git command") {
+		t.Errorf("aliased `git snaps` should reach real git: code=%d stderr=%q", code, stderr)
+	}
+	if got := tr.Git("log", "-1", "--format=%s", "refs/jog/main"); got != "pre: git snaps" {
+		t.Errorf("provenance = %q — the failed passthrough should still have snapshotted first", got)
+	}
+
+	// Bare `git` is git's usage screen, not a jog snapshot report.
+	stdout, _, code := runJogAsGit(t, tr.Dir)
+	if code != 1 || !strings.Contains(stdout, "usage: git") {
+		t.Errorf("bare aliased git: code=%d stdout=%q...", code, stdout[:min(80, len(stdout))])
 	}
 }
 

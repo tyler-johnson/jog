@@ -224,6 +224,16 @@ stays clean and future-us knows what was chosen and why.
   argv[0] — carries the distinction, because a plain alias substitution
   leaves argv[0] identical either way, and a git-named symlink on disk is
   exactly what DESIGN §5 forbids.
+- **D9 — as `git`, pure passthrough; jog verbs only behind `jog`.**
+  Generalizes D8 to the whole grammar: with JOG_AS_GIT set, *every*
+  invocation snapshots and execs real git — no verb matching at all. This
+  makes collision with git subcommands, user aliases, or future git
+  additions structurally impossible (amends DESIGN §5's "reserved verbs
+  chosen to avoid collision" — the namespaces no longer touch), and it
+  makes D7's `st` concern moot, though `since` stays the better name.
+  Direct `jog <non-verb>` still passes through, so jog works without the
+  alias too. Consequence: `git -m "msg"` is git's error, not a manual
+  snapshot — deliberate checkpoints are `jog` / `jog -m`.
 
 ## 5. Test matrix
 

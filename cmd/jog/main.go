@@ -1,11 +1,14 @@
 // jog — a memory for your working tree.
 //
-// Reserved verbs are handled by jog; anything else snapshots and then execs
-// the real git binary (docs/DESIGN.md §5). The reserved list collides with
-// no working git invocation — including help: the alias exports JOG_AS_GIT=1
-// so `git help`/`--help`/`-h` pass through to real git, while a directly
-// typed `jog -h` gets jog's own usage. Verbs beyond the v0 set are reserved
-// now so adding them later never changes passthrough semantics.
+// Two entry modes (docs/PLAN-V0.md D9):
+//
+//   - As `git` (the alias exports JOG_AS_GIT=1): pure passthrough — every
+//     invocation snapshots and execs real git. No jog verbs exist here, so
+//     collision with any git subcommand, alias, or future addition is
+//     structurally impossible.
+//   - As `jog`: reserved verbs are handled by jog; anything else snapshots
+//     and execs real git (works without the alias too). Verbs beyond the v0
+//     set are reserved now so adding them later changes nothing.
 package main
 
 import (
@@ -37,6 +40,13 @@ func main() {
 }
 
 func run(args []string) int {
+	// Typed as `git` (the alias exports JOG_AS_GIT=1): pure passthrough,
+	// always — snapshot, then exec real git, with zero verb matching. jog's
+	// own verbs exist only behind a directly typed `jog` (D9), so no git
+	// invocation, present or future, can ever collide with them.
+	if os.Getenv("JOG_AS_GIT") != "" {
+		return cli.Passthrough(args)
+	}
 	if len(args) == 0 {
 		return cli.Snapshot("")
 	}
@@ -64,11 +74,6 @@ func run(args []string) int {
 		fmt.Fprintf(os.Stderr, "jog: %q is reserved for a future release (see docs/PLAN-V0.md)\n", args[0])
 		return 1
 	case "-h", "--help", "help":
-		// The alias exports JOG_AS_GIT=1, so `git help`/`git -h` still reach
-		// real git; only a directly typed `jog -h` shows jog's own help.
-		if os.Getenv("JOG_AS_GIT") != "" {
-			return cli.Passthrough(args)
-		}
 		fmt.Print(usage)
 		return 0
 	default:
