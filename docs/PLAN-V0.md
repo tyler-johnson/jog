@@ -176,11 +176,14 @@ Milestones are sequential; each lands with its tests. Dogfood begins at M4.
 
 ### M7 — docs + dogfood exit (S)
 
-- [ ] README: what/why (borrow DESIGN's elevator pitches), `go install`,
-      alias install per shell, settings.json snippet, recovery cookbook
-      (three worked examples: deleted file, pre-refactor diff, full rollback),
-      leak-vector note (`push --mirror` etc.), accepted gaps
-- [ ] Exit checklist (§7 below)
+- [x] README (structure modeled on jj/ripgrep/zoxide research): centered
+      title, text demo, three pitches + how-it-works, status callout,
+      numbered install (binary → alias → Claude hooks → verify), usage table
+      + the two-namespace rule, recovery cookbook (three worked examples),
+      "what jog will never touch" + stock-git no-lock-in one-liners,
+      ripgrep-style "why not jog" anti-pitch (accepted gaps + leak vectors),
+      config table, landscape comparison, roadmap. MIT LICENSE added.
+- [ ] Exit checklist (§7 below) — waiting on the dogfood clock
 
 ## 4. Forced decisions (beyond DESIGN.md)
 
