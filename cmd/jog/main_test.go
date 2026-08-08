@@ -161,13 +161,23 @@ func TestPassthroughSnapshotsBeforeDestruction(t *testing.T) {
 	}
 }
 
-// help must reach real git — the reserved list collides with nothing that
-// works in git, and `git help` works in git.
-func TestHelpPassesThrough(t *testing.T) {
+// Under the alias (JOG_AS_GIT=1), help must reach real git; typed directly,
+// `jog -h` shows jog's own usage.
+func TestHelp(t *testing.T) {
 	dir := t.TempDir()
-	stdout, _, code := runJog(t, dir, "help")
-	if code != 0 || !strings.Contains(stdout, "usage: git") {
-		t.Errorf("git help: code=%d stdout=%q...", code, stdout[:min(80, len(stdout))])
+	for _, arg := range []string{"-h", "--help", "help"} {
+		stdout, _, code := runJog(t, dir, arg)
+		if code != 0 || !strings.Contains(stdout, "jog — a memory for your working tree") {
+			t.Errorf("jog %s: code=%d stdout=%q...", arg, code, stdout[:min(80, len(stdout))])
+		}
+	}
+
+	cmd := exec.Command(jogBin, "help")
+	cmd.Dir = dir
+	cmd.Env = append(os.Environ(), "JOG_AS_GIT=1", "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_SYSTEM=/dev/null")
+	out, err := cmd.Output()
+	if err != nil || !strings.Contains(string(out), "usage: git") {
+		t.Errorf("aliased git help: err=%v stdout=%q...", err, string(out[:min(80, len(out))]))
 	}
 }
 

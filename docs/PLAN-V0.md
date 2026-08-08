@@ -110,7 +110,7 @@ Milestones are sequential; each lands with its tests. Dogfood begins at M4.
 - [x] Outside a repo, passthrough still execs git cleanly (no snapshot, no noise)
 - [x] *Correction to M0:* no jog `help`/`-h`/`--help` interception — those are
       working git invocations and must reach git under the alias (same
-      principle as D7). jog's docs live in the README.
+      principle as D7). Superseded by D8: invocation-aware help.
 
 ### M4 — `jog hook claude` (M) → **dogfood started 2026-08-08** — ✅ done
 
@@ -210,6 +210,13 @@ stays clean and future-us knows what was chosen and why.
   aliases*; with `alias git=jog`, a jog-reserved `st` would intercept
   `git st` before git's alias machinery sees it — the exact collision the
   reserved-verb rule exists to prevent.
+- **D8 — invocation-aware help via the alias.** The alias is
+  `alias git='JOG_AS_GIT=1 jog'`: with the marker set, `help`/`-h`/`--help`
+  pass through to real git (shim transparency, same principle as D7);
+  typed directly, `jog -h` prints jog's own usage. The env var — not
+  argv[0] — carries the distinction, because a plain alias substitution
+  leaves argv[0] identical either way, and a git-named symlink on disk is
+  exactly what DESIGN §5 forbids.
 
 ## 5. Test matrix
 
