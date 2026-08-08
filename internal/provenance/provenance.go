@@ -22,9 +22,14 @@ func Manual(detail string) string {
 	return "manual: " + Truncate(detail, maxSubject)
 }
 
-// PreGit is a passthrough snapshot taken causally before a git command.
+// Pre is a snapshot taken causally before a command runs.
+func Pre(cmdline string) string {
+	return "pre: " + Truncate(cmdline, maxSubject)
+}
+
+// PreGit is Pre for a passthrough git command.
 func PreGit(gitArgs []string) string {
-	return "pre: " + Truncate("git "+strings.Join(gitArgs, " "), maxSubject)
+	return Pre("git " + strings.Join(gitArgs, " "))
 }
 
 // Claude is a Claude Code hook snapshot: `claude[<sid[:8]>]: <detail>`.

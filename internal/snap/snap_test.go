@@ -87,6 +87,25 @@ func TestSnapshotLeavesIndexAlone(t *testing.T) {
 	}
 }
 
+// D1 must survive hostile environments: GIT_COMMITTER_*/GIT_AUTHOR_* env
+// overrides git config, so `-c user.*` identity would silently break the
+// snaps walk terminator. The engine sets identity via env-on-env instead.
+func TestSnapshotIdentityBeatsEnv(t *testing.T) {
+	tr, r := setup(t)
+	t.Setenv("GIT_AUTHOR_NAME", "evil")
+	t.Setenv("GIT_AUTHOR_EMAIL", "evil@example.com")
+	t.Setenv("GIT_COMMITTER_NAME", "evil")
+	t.Setenv("GIT_COMMITTER_EMAIL", "evil@example.com")
+	tr.Write("a.txt", "x\n")
+	tr.Commit("first")
+	tr.Write("b.txt", "y\n")
+
+	res := take(t, r, "manual: identity")
+	if got := tr.Git("log", "-1", "--format=%cn <%ce> %an <%ae>", res.Ref); got != "jog <jog@local> jog <jog@local>" {
+		t.Errorf("identity = %q, want jog <jog@local> for both roles", got)
+	}
+}
+
 // 2 — a held .git/index.lock (concurrent git activity) doesn't block
 // snapshots: shadow ops never touch the real index lock.
 func TestSnapshotWithRealIndexLockHeld(t *testing.T) {

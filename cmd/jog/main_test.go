@@ -75,6 +75,10 @@ func TestBareJogSnapshots(t *testing.T) {
 	if !strings.Contains(stdout, "snapshot ") || !strings.Contains(stdout, " on main") {
 		t.Errorf("stdout = %q", stdout)
 	}
+	// D6: after snapshotting, bare jog shows the top of the timeline.
+	if !strings.Contains(stdout, "ago  manual") {
+		t.Errorf("bare jog missing recent-timeline readout: %q", stdout)
+	}
 	if got := tr.Git("log", "-1", "--format=%s", "refs/jog/main"); got != "manual" {
 		t.Errorf("provenance = %q, want manual", got)
 	}
@@ -178,6 +182,58 @@ func TestHelp(t *testing.T) {
 	out, err := cmd.Output()
 	if err != nil || !strings.Contains(string(out), "usage: git") {
 		t.Errorf("aliased git help: err=%v stdout=%q...", err, string(out[:min(80, len(out))]))
+	}
+}
+
+// Matrix row 16 + M5: the timeline shows all snapshots, newest first, stops
+// at the real-history boundary, filters by path, and snapshots before
+// reading (jj-style).
+func TestSnaps(t *testing.T) {
+	tr := testrepo.New(t)
+	tr.Write("a.txt", "one\n")
+	tr.Commit("real history commit")
+	tr.Write("a.txt", "two\n")
+	runJog(t, tr.Dir, "-m", "checkpoint one")
+	tr.Write("b.txt", "new\n")
+	runJog(t, tr.Dir, "-m", "checkpoint two")
+
+	stdout, stderr, code := runJog(t, tr.Dir, "snaps")
+	if code != 0 {
+		t.Fatalf("snaps exited %d: %s", code, stderr)
+	}
+	if !strings.Contains(stdout, "manual: checkpoint one") || !strings.Contains(stdout, "manual: checkpoint two") {
+		t.Errorf("timeline missing snapshots:\n%s", stdout)
+	}
+	if !strings.Contains(stdout, "b.txt") {
+		t.Errorf("files-changed detail missing:\n%s", stdout)
+	}
+	// Row 16: the first-parent walk must stop at the chain boundary, not
+	// run into real history.
+	if strings.Contains(stdout, "real history commit") {
+		t.Errorf("timeline walked into real history:\n%s", stdout)
+	}
+	if strings.Index(stdout, "checkpoint two") > strings.Index(stdout, "checkpoint one") {
+		t.Errorf("timeline not newest-first:\n%s", stdout)
+	}
+
+	// Path filter: only entries touching b.txt.
+	stdout, _, _ = runJog(t, tr.Dir, "snaps", "b.txt")
+	if !strings.Contains(stdout, "checkpoint two") || strings.Contains(stdout, "checkpoint one") {
+		t.Errorf("path filter wrong:\n%s", stdout)
+	}
+
+	// -p appends patches.
+	stdout, _, _ = runJog(t, tr.Dir, "snaps", "-p")
+	if !strings.Contains(stdout, "diff --git") || !strings.Contains(stdout, "+new") {
+		t.Errorf("-p missing patches:\n%s", stdout)
+	}
+
+	// Reading snapshots first: a dirty tree lands on the timeline before
+	// it is displayed.
+	tr.Write("a.txt", "three\n")
+	stdout, _, _ = runJog(t, tr.Dir, "snaps")
+	if !strings.Contains(stdout, "pre: jog snaps") {
+		t.Errorf("snaps did not snapshot before reading:\n%s", stdout)
 	}
 }
 

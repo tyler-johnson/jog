@@ -49,7 +49,7 @@ func run(args []string) int {
 		}
 		return cli.Snapshot(args[1])
 	case "snaps":
-		return notImplemented("snaps", "M5")
+		return cli.Snaps(args[1:])
 	case "back":
 		return notImplemented("back", "M6")
 	case "hook":

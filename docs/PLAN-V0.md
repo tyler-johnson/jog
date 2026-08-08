@@ -132,19 +132,26 @@ Milestones are sequential; each lands with its tests. Dogfood begins at M4.
       snapshot landed causally before a Bash call with correct session
       provenance; unchanged trees correctly no-op. Dogfood is on.
 
-### M5 — `jog snaps` (M)
+### M5 — `jog snaps` (M) — ✅ done
 
-- [ ] `git log --first-parent refs/jog/<branch>` with a custom format: short
-      id, reflog-style age, provenance, files-changed summary (`--name-status`
-      vs parent 1); `-p` appends patches; optional path filter
-- [ ] **Walk termination:** the oldest snapshot's parent 1 is a *real* HEAD
-      commit (recipe: when `PREV` is empty, the only parent is HEAD), so a
-      naive first-parent walk runs off the snapshot chain into real history.
-      Stop at the first commit whose committer isn't `jog <jog@local>`.
-- [ ] Default scope: current branch's chain (DESIGN open question 5 — decided
-      for v0, see D5). No `--all` until v1.
-- [ ] List files skipped by `maxFileSize` (recorded per D2)
-- [ ] Bare `jog`: after snapshotting, print the top few timeline entries (D6)
+- [x] Boundary discovery (streamed `%H %ce` first-parent walk, killed at the
+      first non-jog committer), then **exec** real `git log --first-parent
+      <boundary>..<ref>` with a curated format — short id, age, provenance,
+      `--name-status` files (or `-p` patches), optional path filter. Exec
+      means git's own pager and coloring apply for free.
+- [x] **Walk termination** (matrix row 16): the oldest snapshot's parent 1 is
+      a *real* HEAD commit, so the walk stops at the first commit not
+      committed by `jog <jog@local>`. Found + fixed a real D1 bug here:
+      identity was set via `-c user.*`, which GIT_COMMITTER_*/GIT_AUTHOR_*
+      env silently overrides — now set env-on-env (exec.Cmd dedups
+      last-wins), with a hostile-env regression test.
+- [x] Default scope: current branch's chain (D5). No `--all` until v1.
+- [x] Skipped-files list surfaces via `%+b` (the commit body, D2)
+- [x] Bare `jog`: after snapshotting, print the top 3 timeline entries (D6)
+- [x] `snaps` snapshots before reading, jj-style — a dirty tree lands on the
+      timeline before it is displayed (and a clean first read mints the
+      chain, so the loud "no snapshots yet" state signals a dead engine, not
+      an unused one)
 
 ### M6 — `jog back` (M)
 

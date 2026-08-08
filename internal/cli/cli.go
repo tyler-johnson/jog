@@ -32,6 +32,14 @@ func Snapshot(message string) int {
 		return 1
 	}
 	report(res)
+	// D6: bare jog mirrors jj's no-arg default — snapshot, then show the
+	// top of the timeline.
+	if lines := recentEntries(repo, 3); len(lines) > 0 {
+		fmt.Println()
+		for _, l := range lines {
+			fmt.Println("  " + l)
+		}
+	}
 	return 0
 }
 
@@ -75,6 +83,12 @@ func Passthrough(gitArgs []string) int {
 		// `git clone`, `git version` outside repos must feel exactly like git.
 	}
 
+	return execGit(gitArgs)
+}
+
+// execGit replaces this process with real git — real TTY (pager, colors,
+// interactive rebase), real exit codes. Returns only on failure.
+func execGit(gitArgs []string) int {
 	gitPath, err := exec.LookPath("git")
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "jog: git not found on PATH")

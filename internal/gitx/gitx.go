@@ -12,6 +12,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -91,6 +92,23 @@ func (r *Repo) RunRead(args ...string) (string, error) {
 	return r.Run(append([]string{"--no-optional-locks"}, args...)...)
 }
 
+// StartRead starts a read command and returns its stdout for streaming, for
+// walks that terminate early (e.g. the snaps chain-boundary scan) — the
+// caller reads what it needs, then kills and waits on the returned cmd.
+func (r *Repo) StartRead(args ...string) (*exec.Cmd, io.ReadCloser, error) {
+	cmd := exec.Command("git", append([]string{"--no-optional-locks"}, args...)...)
+	cmd.Dir = r.WorkDir
+	cmd.Env = append(os.Environ(), r.extraEnv...)
+	out, err := cmd.StdoutPipe()
+	if err != nil {
+		return nil, nil, err
+	}
+	if err := cmd.Start(); err != nil {
+		return nil, nil, err
+	}
+	return cmd, out, nil
+}
+
 // WithIndex returns a copy of the repo whose commands run against the given
 // index file via GIT_INDEX_FILE — the shadow-index mechanism. The path must
 // be absolute: a relative GIT_INDEX_FILE resolves inside the worktree
@@ -101,6 +119,15 @@ func (r *Repo) WithIndex(indexPath string) *Repo {
 	}
 	c := *r
 	c.extraEnv = append(append([]string{}, r.extraEnv...), "GIT_INDEX_FILE="+indexPath)
+	return &c
+}
+
+// WithEnv returns a copy of the repo whose commands run with the given
+// KEY=VALUE pairs appended. exec.Cmd keeps the last value for duplicate
+// keys, so these override anything inherited from the process environment.
+func (r *Repo) WithEnv(kv ...string) *Repo {
+	c := *r
+	c.extraEnv = append(append([]string{}, r.extraEnv...), kv...)
 	return &c
 }
 

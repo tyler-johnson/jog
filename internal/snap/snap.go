@@ -151,7 +151,14 @@ func Take(repo *gitx.Repo, message string) (*Result, error) {
 
 	// Parent order matters: parent 1 = previous snapshot (clean
 	// `log --first-parent` timeline, verified), parent 2 = HEAD (base edge).
-	ct := []string{"-c", "user.name=" + IdentityName, "-c", "user.email=" + IdentityEmail, "commit-tree", tree}
+	// Identity via ENV, not `-c user.*`: GIT_COMMITTER_*/GIT_AUTHOR_* in the
+	// user's environment would override config and silently break the D1
+	// walk terminator; env-on-env wins (exec.Cmd keeps the last duplicate).
+	ident := e.repo.WithEnv(
+		"GIT_AUTHOR_NAME="+IdentityName, "GIT_AUTHOR_EMAIL="+IdentityEmail,
+		"GIT_COMMITTER_NAME="+IdentityName, "GIT_COMMITTER_EMAIL="+IdentityEmail,
+	)
+	ct := []string{"commit-tree", tree}
 	if prev != "" {
 		ct = append(ct, "-p", prev)
 	}
@@ -162,7 +169,7 @@ func Take(repo *gitx.Repo, message string) (*Result, error) {
 	if len(skipped) > 0 {
 		ct = append(ct, "-m", SkippedHeader+"\n"+strings.Join(skipped, "\n"))
 	}
-	snapSHA, err := e.repo.Run(ct...)
+	snapSHA, err := ident.Run(ct...)
 	if err != nil {
 		return nil, err
 	}
