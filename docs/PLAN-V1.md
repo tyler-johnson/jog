@@ -211,21 +211,28 @@ repos (all snapshots inside keep-all; correctly nothing to drop).
 - [ ] Interactive drill on a real terminal (Tyler): scrub + restore + undo
       once in anger — the exit-checklist item carries it.
 
-### M13 — release channel (S/M)
+### M13 — release channel (S/M) — ✅ done 2026-08-08
 
-- [ ] Tag `v0.1.0` at M8-complete (perf budget met = the engine is what the
-      README promises), then tag per milestone; the version verb (already
-      reading build info) starts showing real semver for `go install` users
-      immediately (D21).
-- [ ] goreleaser: linux/darwin × amd64/arm64 static binaries, checksums,
-      GitHub Releases via tag-triggered workflow.
-- [ ] Homebrew tap `tyler-johnson/homebrew-tap` with a formula pointing at
-      the release binaries; caveats text prints the alias line and the
-      Claude-hooks pointer (install steps 2–3 of the README, which can't be
-      automated politely).
-- [ ] README: install section gains brew as the first option; roadmap
-      updated; `since`/`doctor`/`trim`/`pick` join the usage table and the
-      recovery cookbook gains a trim/retention entry.
+- [x] Tagged `v0.1.0` (D21). Verified end-to-end: workflow-built archives
+      for all four platforms, checksums match, the released linux_arm64
+      binary runs on the Pi, and both the release binary and
+      `go install …@v0.1.0` print a clean `jog version v0.1.0`.
+      (First cut printed `v0.1.0+dirty` — goreleaser's untracked `dist/`
+      makes Go's VCS stamping report a dirty tree; fixed by gitignoring
+      `dist/` and re-cutting the tag.)
+- [x] goreleaser v2 config + tag-triggered workflow (`release.yml`,
+      GITHUB_TOKEN only).
+- [x] Homebrew tap `tyler-johnson/homebrew-tap` published with the 0.1.0
+      formula (per-platform release binaries, caveats printing the alias
+      line + hooks pointer + `jog doctor`). **Formula bumps are manual for
+      now:** goreleaser's tap automation needs a cross-repo push token the
+      workflow doesn't have — wire `HOMEBREW_TAP_GITHUB_TOKEN` + a `brews`
+      section when release cadence justifies it.
+- [x] README: brew + releases-page install, `since`/`pick`/`trim`/`doctor`
+      in the usage table, cookbook entries for since/pick/trim, roadmap
+      flipped to shipped/next, status callout updated to 0.x.
+- [ ] `brew install tyler-johnson/tap/jog` on a clean machine — needs a
+      brew host (no brew on the Pi); carried by the exit checklist.
 
 ## 4. Forced decisions (beyond DESIGN.md)
 
@@ -330,15 +337,22 @@ property tests.
 
 ## 7. v1 exit checklist
 
-- [ ] All matrix rows 1–32 green; no-op ≤ 30 ms sustained on the Pi
+- [x] All matrix rows 1–32 green; no-op ≤ 30 ms on the Pi (23.0 ms
+      dirty-unchanged, 8.4 ms clean — 2026-08-08; the gate is now a local
+      test failure if it regresses)
 - [ ] v0 exit checklist fully closed (accrual week + README stranger test)
-- [ ] `doctor` green on ≥ 2 real repos; at least one real misconfiguration
-      caught by it during dogfood (manufacture one if none occurs naturally)
+- [ ] `doctor` green on ≥ 2 real repos *(green on both since 2026-08-08)*;
+      at least one real misconfiguration caught during dogfood (manufacture
+      one if none occurs naturally)
 - [ ] Manual `trim` run on ≥ 2 real repos for ≥ 2 weeks: object counts
       shrink, every post-trim `back`/`since`/`pick` still correct, zero
       "needed a snapshot trim dropped" events → only then does the
-      piggyback land (D19)
+      piggyback land (D19). *(Clock starts when the first chains age past
+      24 h — dry-runs verified correct on both repos day one.)*
 - [ ] `pick` used in anger for at least one real recovery or comparison
+      (also covers the interactive TUI drill M12 left open)
 - [ ] `brew install tyler-johnson/tap/jog` on a clean machine → alias +
       hooks → first snapshot, using only README + caveats text
-- [ ] Tagged release with binaries for linux/darwin × amd64/arm64
+- [x] Tagged release with binaries for linux/darwin × amd64/arm64
+      (v0.1.0, 2026-08-08; released arm64 binary + `go install @v0.1.0`
+      both verified)
