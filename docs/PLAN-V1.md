@@ -215,16 +215,17 @@ repos (all snapshots inside keep-all; correctly nothing to drop).
 
 ### M13 — release channel (S/M) — ✅ done 2026-08-08
 
-- [x] Tagged `v0.1.0` (D21). Verified end-to-end: workflow-built archives
-      for all four platforms, checksums match, the released linux_arm64
-      binary runs on the Pi, and both the release binary and
-      `go install …@v0.1.0` print a clean `jog version v0.1.0`.
+- [x] Tagged `v1.0.0` (D21 as amended; first cut went out as v0.1.0 and
+      was re-released the same day at Tyler's call). Verified end-to-end:
+      workflow-built archives for all four platforms, checksums match, the
+      released linux_arm64 binary runs on the Pi, and both the release
+      binary and `go install …@v1.0.0` print a clean `jog version v1.0.0`.
       (First cut printed `v0.1.0+dirty` — goreleaser's untracked `dist/`
       makes Go's VCS stamping report a dirty tree; fixed by gitignoring
       `dist/` and re-cutting the tag.)
 - [x] goreleaser v2 config + tag-triggered workflow (`release.yml`,
       GITHUB_TOKEN only).
-- [x] Homebrew tap `tyler-johnson/homebrew-tap` published with the 0.1.0
+- [x] Homebrew tap `tyler-johnson/homebrew-tap` published with the 1.0.0
       formula (per-platform release binaries, caveats printing the alias
       line + hooks pointer + `jog doctor`). **Formula bumps are manual for
       now:** goreleaser's tap automation needs a cross-repo push token the
@@ -358,5 +359,5 @@ property tests.
 - [ ] `brew install tyler-johnson/tap/jog` on a clean machine → alias +
       hooks → first snapshot, using only README + caveats text
 - [x] Tagged release with binaries for linux/darwin × amd64/arm64
-      (v0.1.0, 2026-08-08; released arm64 binary + `go install @v0.1.0`
+      (v1.0.0, 2026-08-08; released arm64 binary + `go install @v1.0.0`
       both verified)
