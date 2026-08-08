@@ -128,6 +128,7 @@ Milestones are sequential; each lands with its tests. Dogfood begins at M4.
 - [ ] Default scope: current branch's chain (DESIGN open question 5 — decided
       for v0, see D5). No `--all` until v1.
 - [ ] List files skipped by `maxFileSize` (recorded per D2)
+- [ ] Bare `jog`: after snapshotting, print the top few timeline entries (D6)
 
 ### M6 — `jog back` (M)
 
@@ -183,6 +184,16 @@ stays clean and future-us knows what was chosen and why.
 - **D5 — `snaps` scope.** Current-branch chain only (git-like), per the
   design's lean on open question 5. `--all` interleaving is v1 work with
   `pick`.
+- **D6 — bare `jog` shows the timeline after snapshotting.** jj's no-arg
+  default is `jj log` (after its implicit snapshot); bare `jog` mirrors that:
+  snapshot first (unchanged from DESIGN §5), then print the last few `snaps`
+  entries. Lands with M5, where the formatting exists. The full graph/forest
+  view is v1 (`pick --all` territory).
+- **D7 — no `st` verb, ever.** The `jj st` analog is `jog since` (v1:
+  worktree vs last snapshot). `st` is one of the most common *user git
+  aliases*; with `alias git=jog`, a jog-reserved `st` would intercept
+  `git st` before git's alias machinery sees it — the exact collision the
+  reserved-verb rule exists to prevent.
 
 ## 5. Test matrix
 
