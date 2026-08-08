@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 
@@ -579,4 +580,105 @@ func TestSnapsAll(t *testing.T) {
 	if strings.Contains(stdout, "real history commit") {
 		t.Errorf("forest view leaked real history past a chain boundary:\n%s", stdout)
 	}
+}
+
+// runJogEnv is runJogStdin with extra environment entries (e.g. a fake HOME
+// for doctor's wiring checks).
+func runJogEnv(t *testing.T, dir string, extraEnv []string, args ...string) (stdout, stderr string, code int) {
+	t.Helper()
+	cmd := exec.Command(jogBin, args...)
+	cmd.Dir = dir
+	cmd.Env = append(append(os.Environ(),
+		"GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_SYSTEM=/dev/null",
+		"GIT_AUTHOR_NAME=test", "GIT_AUTHOR_EMAIL=test@example.com",
+		"GIT_COMMITTER_NAME=test", "GIT_COMMITTER_EMAIL=test@example.com",
+	), extraEnv...)
+	var so, se bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &so, &se
+	err := cmd.Run()
+	code = 0
+	if err != nil {
+		ee, ok := err.(*exec.ExitError)
+		if !ok {
+			t.Fatalf("running jog %v: %v", args, err)
+		}
+		code = ee.ExitCode()
+	}
+	return so.String(), se.String(), code
+}
+
+// TestDoctor covers matrix row 30: healthy exits 0; a dead chain, missing
+// gc keys, and a foreign chain tip are each findings (exit 1); --fix writes
+// only the two gc keys.
+func TestDoctor(t *testing.T) {
+	home := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(home, ".claude"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	settings := `{"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"jog hook claude"}]}]}}`
+	if err := os.WriteFile(filepath.Join(home, ".claude", "settings.json"), []byte(settings), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	env := []string{"HOME=" + home}
+
+	// Engine never run: the loudest finding doctor exists for.
+	tr := testrepo.New(t)
+	tr.Write("a.txt", "one\n")
+	tr.Commit("base")
+	stdout, _, code := runJogEnv(t, tr.Dir, env, "doctor")
+	if code != 1 || !strings.Contains(stdout, "never run") {
+		t.Errorf("dead engine: code=%d\n%s", code, stdout)
+	}
+
+	// Healthy: snapshot (mints chain + reflog + gc keys), hooks wired.
+	runJog(t, tr.Dir, "-m", "first")
+	stdout, _, code = runJogEnv(t, tr.Dir, env, "doctor")
+	if code != 0 {
+		t.Errorf("healthy repo: code=%d\n%s", code, stdout)
+	}
+	if !strings.Contains(stdout, "no findings") || !strings.Contains(stdout, "claude hooks") {
+		t.Errorf("healthy output:\n%s", stdout)
+	}
+
+	// gc keys stripped: a finding, and --fix restores exactly those two.
+	tr.Git("config", "--unset", "gc.refs/jog/*.reflogExpire")
+	tr.Git("config", "--unset", "gc.refs/jog/*.reflogExpireUnreachable")
+	before := tr.Git("config", "--local", "-l")
+	stdout, _, code = runJogEnv(t, tr.Dir, env, "doctor")
+	if code != 1 || !strings.Contains(stdout, "gc config") || !strings.Contains(stdout, "--fix") {
+		t.Errorf("missing gc keys: code=%d\n%s", code, stdout)
+	}
+	stdout, _, code = runJogEnv(t, tr.Dir, env, "doctor", "--fix")
+	if code != 0 || !strings.Contains(stdout, "fixed") {
+		t.Errorf("doctor --fix: code=%d\n%s", code, stdout)
+	}
+	after := tr.Git("config", "--local", "-l")
+	wantAdded := before + "\ngc.refs/jog/*.reflogexpire=never\ngc.refs/jog/*.reflogexpireunreachable=never"
+	if sortLines(after) != sortLines(wantAdded) {
+		t.Errorf("--fix wrote more than the two gc keys:\nbefore: %q\nafter: %q", before, after)
+	}
+
+	// Foreign tip: something other than jog moved the chain ref.
+	tr.Git("update-ref", "refs/jog/main", "HEAD")
+	stdout, _, code = runJogEnv(t, tr.Dir, env, "doctor")
+	if code != 1 || !strings.Contains(stdout, "identity") {
+		t.Errorf("foreign tip: code=%d\n%s", code, stdout)
+	}
+
+	// No triggers wired at all: the silent-engine finding.
+	bare := t.TempDir()
+	tr2 := testrepo.New(t)
+	tr2.Write("a.txt", "one\n")
+	tr2.Commit("base")
+	runJog(t, tr2.Dir, "-m", "first")
+	stdout, _, code = runJogEnv(t, tr2.Dir, []string{"HOME=" + bare}, "doctor")
+	if code != 1 || !strings.Contains(stdout, "neither the alias nor Claude hooks") {
+		t.Errorf("no triggers: code=%d\n%s", code, stdout)
+	}
+}
+
+func sortLines(s string) string {
+	lines := strings.Split(strings.TrimSpace(s), "\n")
+	sort.Strings(lines)
+	return strings.Join(lines, "\n")
 }

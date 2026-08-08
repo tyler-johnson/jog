@@ -125,23 +125,26 @@ writes, `doctor` before `trim` (the auditor exists before the first deleter),
       compact summary against hook-provenance targets; forest view shows
       `jog/main` and the deleted-branch chain `jog/drill/timeline`).
 
-### M10 — `jog doctor` (M)
+### M10 — `jog doctor` (M) — ✅ done 2026-08-08
 
-- [ ] Checks, each mapped to a DESIGN §9 invariant or a v0 lesson:
-      repo discovery + bare detection; shadow index present/absent (absent
-      is fine — reports "will seed"); chain refs + reflogs exist where
-      expected; `gc.refs/jog/*` keys present; snapshot identity resolvable
-      (D1); alias wired (`git` resolves to `jog git` in the *interactive*
-      shell — detectable only heuristically, reported not asserted); Claude
-      hook wiring in `~/.claude/settings.json`; last-snapshot age per chain
-      (the liveness check `snaps`' loud empty state has been standing in
-      for).
-- [ ] Read-only by default; `doctor --fix` writes the gc config keys (and
-      nothing else) with explicit consent — retiring the D3 bend: the lazy
-      engine-side write stays as a safety net, `doctor` is the documented
-      front door (D15).
-- [ ] Exit codes: 0 healthy, 1 findings — scriptable, and the future brew
-      caveat can say "run `jog doctor`".
+- [x] Checks shipped, each mapped to a DESIGN §9 invariant or a v0 lesson:
+      repo discovery + bare detection (bare/non-repo degrade to global-only
+      wiring checks); per-chain tip age listing (the liveness check `snaps`'
+      loud empty state was standing in for); chain-tip D1 identity ("moved
+      by something other than jog"); reflog presence per chain (`git reflog
+      exists`); `gc.refs/jog/*` keys == `never`; shadow index
+      present/absent (info); effective `jog.maxFileSize` (info); Claude
+      hook wiring in `~/.claude/settings.json` (deterministic JSON parse);
+      alias presence in shell rc files (heuristic, reported never
+      asserted). "Neither alias nor hooks wired" is the one trigger-level
+      finding — a silent engine feels safe while capturing nothing.
+- [x] Read-only by default; `doctor --fix` writes the two gc keys and
+      nothing else (asserted byte-level in the row-30 test) — D15, retiring
+      the D3 bend; the lazy engine-side write stays as the safety net.
+- [x] Exit codes: 0 healthy, 1 findings. Row 30 green; verified live on
+      both real repos (all-ok), outside a repo (global-only), and against
+      manufactured findings (dead engine, stripped gc keys, foreign tip,
+      unwired triggers).
 
 ### M11 — `jog trim` + retention (L, the core of v1)
 
