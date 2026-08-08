@@ -78,6 +78,7 @@ func (r *Repo) Run(args ...string) (string, error) {
 		return "", &GitError{
 			Args:     args,
 			ExitCode: code,
+			Stdout:   strings.TrimSpace(stdout.String()),
 			Stderr:   strings.TrimSpace(stderr.String()),
 			cause:    err,
 		}
@@ -129,6 +130,43 @@ func (r *Repo) StartRead(args ...string) (*exec.Cmd, io.ReadCloser, error) {
 	return cmd, out, nil
 }
 
+// HeadBranch returns the current branch's short name, or detached=true on a
+// detached HEAD. It reads $GIT_DIR/HEAD directly — the format is documented
+// and stable (gitrepository-layout(5): a `ref:` symref line or a raw object
+// id), and this sits on the snapshot hot path where a spawn costs more than
+// the whole file read. Anything unexpected falls back to a symbolic-ref
+// spawn, keeping the fast read an optimization, never a semantic.
+func (r *Repo) HeadBranch() (branch string, detached bool) {
+	if b, err := os.ReadFile(filepath.Join(r.GitDir, "HEAD")); err == nil {
+		s := strings.TrimSpace(string(b))
+		if rest, ok := strings.CutPrefix(s, "ref: "); ok {
+			if br, ok := strings.CutPrefix(rest, "refs/heads/"); ok && br != "" {
+				return br, false
+			}
+			// Symref outside refs/heads — rare; let git interpret it.
+		} else if isHex(s) {
+			return "", true
+		}
+	}
+	out, err := r.RunRead("symbolic-ref", "--short", "HEAD")
+	if err != nil {
+		return "", true
+	}
+	return out, false
+}
+
+func isHex(s string) bool {
+	if len(s) < 40 {
+		return false
+	}
+	for _, c := range s {
+		if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
+			return false
+		}
+	}
+	return true
+}
+
 // WithIndex returns a copy of the repo whose commands run against the given
 // index file via GIT_INDEX_FILE — the shadow-index mechanism. The path must
 // be absolute: a relative GIT_INDEX_FILE resolves inside the worktree
@@ -151,10 +189,14 @@ func (r *Repo) WithEnv(kv ...string) *Repo {
 	return &c
 }
 
-// GitError is a non-zero git exit.
+// GitError is a non-zero git exit. Stdout carries whatever the command
+// printed before failing — some commands (rev-parse with several queries)
+// emit useful partial results ahead of a fatal, and the engine's batched
+// state read depends on recovering them.
 type GitError struct {
 	Args     []string
 	ExitCode int
+	Stdout   string
 	Stderr   string
 	cause    error
 }

@@ -457,29 +457,56 @@ func TestNoOpPerf(t *testing.T) {
 		t.Skip("perf smoke skipped in -short")
 	}
 	tr, r := setup(t)
-	for i := 0; i < 2000; i++ {
-		tr.Write(filepath.Join("src", string(rune('a'+i%26)), fmt.Sprintf("f%04d.txt", i)), "content\n")
+	// Backdate the files: entries whose mtime shares the index write's
+	// second are "racily clean" and git re-reads their contents on every
+	// status/add (~4× slower, second-granularity, lab-verified). Real repos
+	// self-heal as the user's own git commands rewrite the index over time;
+	// a mass-created test repo never would, so it must model the healthy
+	// steady state explicitly.
+	old := time.Now().Add(-time.Minute)
+	for i := 0; i < 5000; i++ {
+		rel := filepath.Join("src", string(rune('a'+i%26)), fmt.Sprintf("f%04d.txt", i))
+		tr.Write(rel, "content\n")
+		if err := os.Chtimes(filepath.Join(tr.Dir, rel), old, old); err != nil {
+			t.Fatal(err)
+		}
 	}
 	tr.Commit("many files")
 	take(t, r, "manual: warm the shadow index")
 
-	const rounds = 3
-	start := time.Now()
-	for i := 0; i < rounds; i++ {
-		if res := take(t, r, "manual: noop"); !res.NoOp {
-			t.Fatalf("expected NoOp, got %+v", res)
+	const rounds = 5
+	bench := func() time.Duration {
+		start := time.Now()
+		for i := 0; i < rounds; i++ {
+			if res := take(t, r, "manual: noop"); !res.NoOp {
+				t.Fatalf("expected NoOp, got %+v", res)
+			}
 		}
+		return time.Since(start) / rounds
 	}
-	noop := time.Since(start) / rounds
 
-	// The design's budget (no-op ≤ 30 ms) is calibrated against warm
-	// `git status` ≈ 20–25 ms on a 5k-file repo — log both so the numbers
+	// Clean tree: the status fast path, no shadow spawns.
+	clean := bench()
+
+	// Dirty but unchanged since the last snapshot — the real hook hot path
+	// (repeated tool calls mid-edit): full shadow add + write-tree.
+	tr.Write("wip.txt", "uncommitted work\n")
+	take(t, r, "manual: capture the dirty state")
+	dirty := bench()
+
+	// Baseline: the design's budget (no-op ≤ 30 ms, M8 gate) is calibrated
+	// against warm `git status` on a 5k-file repo — log it so the numbers
 	// are comparable across hardware.
-	start = time.Now()
+	start := time.Now()
 	for i := 0; i < rounds; i++ {
 		tr.Git("--no-optional-locks", "status", "--porcelain")
 	}
 	status := time.Since(start) / rounds
-	t.Logf("warm no-op snapshot: %v avg; git status baseline: %v avg (%d rounds; budget: no-op ≤ 30ms)",
-		noop, status, rounds)
+	t.Logf("warm no-op: dirty-unchanged %v, clean %v; git status baseline: %v (%d rounds)",
+		dirty, clean, status, rounds)
+
+	// Locally gating post-M8; advisory in CI (shared-runner timing noise).
+	if os.Getenv("CI") == "" && dirty > 30*time.Millisecond {
+		t.Errorf("dirty-unchanged no-op %v exceeds the 30ms budget (M8 gate)", dirty)
+	}
 }

@@ -61,22 +61,32 @@ value-and-risk-driven: perf first (everything sits on it), reads before
 writes, `doctor` before `trim` (the auditor exists before the first deleter),
 `pick` after the data layer it browses, release last.
 
-### M8 — engine perf to budget (M)
+### M8 — engine perf to budget (M) — ✅ done 2026-08-08
 
-- [ ] Consolidate spawns on the snapshot path. Candidates from the v0
-      finding, in expected-payoff order: merge the two `config` reads into
-      one `--get-regexp '^(jog|core\.sparsecheckout)'` call; collapse the
-      rev-parse cluster (branch, HEAD, ref, `ref^{tree}`) into fewer
-      multi-arg invocations; make the D2 oversize pre-scan conditional or
-      cheaper (it is a second full tree walk today). The gate is the number,
-      not any particular trick.
-- [ ] **Gate:** warm no-op ≤ 30 ms on the Pi against the row-20 generated
-      repo; matrix row 20 flips from advisory to locally gating (stays
-      non-gating in CI — shared-runner timing noise).
-- [ ] No behavior change: the full v0 matrix is the regression net; rows
-      1–20 must pass untouched. Any consolidation that would bend an
-      invariant (e.g. admitting oversize blobs to dodge the pre-scan) is out
-      of bounds.
+- [x] Consolidated spawns: the warm hot path is now **5 spawns dirty / 3
+      clean** (was 9). Mechanisms, each lab-verified first: (a) one batched
+      tolerant `rev-parse` for toplevel + HEAD + HEAD tree + chain ref +
+      chain tree — rev-parse answers queries in order and echoes the failing
+      arg before exit 128, so the surviving line count identifies unborn
+      HEAD / missing chain; (b) branch name read from `$GIT_DIR/HEAD`
+      directly (documented stable format, `symbolic-ref` spawn as fallback —
+      an optimization, never a semantic); (c) one `config -z --get-regexp`
+      replacing both config reads, with git's int-suffix/bool syntax parsed
+      engine-side; (d) the D2 status pre-scan now doubles as a **clean-tree
+      fast path** — empty porcelain status means the would-be tree is
+      exactly HEAD's tree, skipping the shadow index entirely.
+- [x] **Gate met:** dirty-unchanged no-op 23.0 ms, clean no-op 8.4 ms vs
+      6.5 ms status baseline (Pi 5, 5k-file repo); real-repo full invocation
+      14–16 ms wall. Row 20/32 now locally gating (30 ms), advisory in CI.
+- [x] No behavior change: rows 1–20 pass untouched.
+- [x] **Finding (racy-clean):** entries whose mtime shares the index
+      write's second are "racily clean" — git re-reads their contents on
+      every status/add (~4×: 28 ms vs 7 ms, lab-verified; comparison is
+      second-granularity). jog itself can never heal the user's index
+      (invariant 1) but the user's own git commands do, so real repos live
+      in the healed state; the perf fixture backdates mtimes to model it.
+      Worth remembering when a repo's `since`/snapshot feels slow right
+      after a mass file-generation step.
 
 ### M9 — `jog since` + `jog snaps --all` (M)
 

@@ -111,8 +111,8 @@ func chainRange(repo *gitx.Repo) (ref, rng string, exists bool, err error) {
 // chainRef resolves the current branch's chain ref (refs/jog/<branch>, or
 // refs/jog/@detached on a detached HEAD).
 func chainRef(repo *gitx.Repo) string {
-	branch, err := repo.RunRead("symbolic-ref", "--short", "HEAD")
-	if err != nil {
+	branch, detached := repo.HeadBranch()
+	if detached {
 		return "refs/jog/@detached"
 	}
 	return "refs/jog/" + branch
