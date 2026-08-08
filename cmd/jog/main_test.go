@@ -107,12 +107,12 @@ func TestPassthroughExitCode(t *testing.T) {
 	tr.Write("a.txt", "x\n")
 	tr.Commit("first")
 
-	_, stderr, code := runJog(t, tr.Dir, "rev-parse", "--verify", "definitely-missing")
+	_, stderr, code := runJogAsGit(t, tr.Dir, "rev-parse", "--verify", "definitely-missing")
 	if code != 128 {
 		t.Errorf("exit = %d, want git's 128; stderr = %q", code, stderr)
 	}
 	tr.Write("b.txt", "change so the next snapshot isn't a no-op\n")
-	_, _, code = runJog(t, tr.Dir, "status", "--porcelain")
+	_, _, code = runJogAsGit(t, tr.Dir, "status", "--porcelain")
 	if code != 0 {
 		t.Errorf("git status via passthrough exited %d", code)
 	}
@@ -125,7 +125,7 @@ func TestPassthroughExitCode(t *testing.T) {
 // no jog noise, git's own behavior and exit codes.
 func TestPassthroughOutsideRepo(t *testing.T) {
 	dir := t.TempDir()
-	stdout, stderr, code := runJog(t, dir, "version")
+	stdout, stderr, code := runJogAsGit(t, dir, "version")
 	if code != 0 || !strings.Contains(stdout, "git version") {
 		t.Errorf("git version: code=%d stdout=%q", code, stdout)
 	}
@@ -133,7 +133,7 @@ func TestPassthroughOutsideRepo(t *testing.T) {
 		t.Errorf("jog noise outside a repo: %q", stderr)
 	}
 
-	_, stderr, code = runJog(t, dir, "status")
+	_, stderr, code = runJogAsGit(t, dir, "status")
 	if code != 128 || !strings.Contains(stderr, "not a git repository") {
 		t.Errorf("git status outside repo: code=%d stderr=%q", code, stderr)
 	}
@@ -150,7 +150,7 @@ func TestPassthroughSnapshotsBeforeDestruction(t *testing.T) {
 	tr.Commit("first")
 	tr.Write("a.txt", "precious uncommitted work\n")
 
-	_, _, code := runJog(t, tr.Dir, "checkout", "--", ".")
+	_, _, code := runJogAsGit(t, tr.Dir, "checkout", "--", ".")
 	if code != 0 {
 		t.Fatalf("checkout exited %d", code)
 	}
@@ -171,8 +171,28 @@ func TestPassthroughSnapshotsBeforeDestruction(t *testing.T) {
 	}
 }
 
-// Under the alias (JOG_AS_GIT=1), help must reach real git; typed directly,
-// `jog -h` shows jog's own usage.
+// D11: `jog <unknown>` is an error with a `jog git` hint — never an
+// implicit passthrough, and never a snapshot.
+func TestUnknownCommandErrors(t *testing.T) {
+	tr := testrepo.New(t)
+	tr.Write("a.txt", "x\n")
+	tr.Commit("first")
+	tr.Write("b.txt", "y\n")
+
+	stdout, stderr, code := runJog(t, tr.Dir, "status")
+	if code != 1 || !strings.Contains(stderr, "jog git status") {
+		t.Errorf("jog status: code=%d stderr=%q", code, stderr)
+	}
+	if strings.Contains(stdout, "On branch") {
+		t.Errorf("jog status ran git: %q", stdout)
+	}
+	if _, err := tr.TryGit("rev-parse", "--verify", "refs/jog/main"); err == nil {
+		t.Error("unknown command minted a snapshot")
+	}
+}
+
+// Through the alias (`jog git help`), help must reach real git; typed
+// directly, `jog -h` shows jog's own usage.
 func TestHelp(t *testing.T) {
 	dir := t.TempDir()
 	for _, arg := range []string{"-h", "--help", "help"} {

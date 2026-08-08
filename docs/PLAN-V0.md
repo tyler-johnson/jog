@@ -236,6 +236,11 @@ stays clean and future-us knows what was chosen and why.
   (build/install weight); one mechanism, portable to any shell, and safe —
   bash aliases don't recurse on their own name. `jog git` must never grow
   interop subcommands (v2's backup push gets its own verb).
+- **D11 — no implicit passthrough.** `jog <unknown>` is an error with a
+  `jog git <args>` hint, not a fallthrough to git (and mints no snapshot).
+  The namespaces are fully disjoint in both directions: `jog git` is the
+  only door to git, and jog's verb space is closed — future verbs can be
+  added without any behavioral change to existing invocations.
 
 ## 5. Test matrix
 

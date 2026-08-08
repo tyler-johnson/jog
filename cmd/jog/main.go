@@ -1,19 +1,19 @@
 // jog — a memory for your working tree.
 //
-// Two entry modes (docs/PLAN-V0.md D10):
+// Two disjoint namespaces (docs/PLAN-V0.md D10/D11):
 //
 //   - `jog git …` (what `alias git='jog git'` produces, jj-style): pure
 //     passthrough, forever — snapshot, then exec real git with the rest of
 //     the args, zero verb matching. Collision with any git subcommand, user
 //     alias, or future git addition is structurally impossible.
-//   - Other `jog` verbs are jog's own; anything unreserved also snapshots
-//     and execs real git, so jog works without the alias too. Verbs beyond
-//     the v0 set are reserved now so adding them later changes nothing.
+//   - Every other `jog` verb is jog's own; unknown verbs are an error with
+//     a `jog git …` hint — never an implicit passthrough.
 package main
 
 import (
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/tyler-johnson/jog/internal/cli"
 )
@@ -28,7 +28,6 @@ usage:
   jog back --all --at T     restore the whole working tree
   jog hook claude           Claude Code hook entry point (reads JSON on stdin)
   jog git <args>            snapshot, then run the real git command
-  jog <any git command>     same, for anything jog doesn't reserve
 
 reserved for future releases: since, pick, trim, mcp, doctor
 
@@ -73,7 +72,9 @@ func run(args []string) int {
 		fmt.Print(usage)
 		return 0
 	default:
-		return cli.Passthrough(args)
+		fmt.Fprintf(os.Stderr, "jog: unknown command %q — git commands go through: jog git %s\n",
+			args[0], strings.Join(args, " "))
+		return 1
 	}
 }
 
