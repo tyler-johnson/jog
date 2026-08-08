@@ -38,12 +38,10 @@ func runJog(t *testing.T, dir string, args ...string) (stdout, stderr string, co
 	return runJogStdin(t, dir, "", args...)
 }
 
-// runJogAsGit invokes jog the way the alias does (JOG_AS_GIT=1).
+// runJogAsGit invokes jog the way the alias does (`jog git …`).
 func runJogAsGit(t *testing.T, dir string, args ...string) (stdout, stderr string, code int) {
 	t.Helper()
-	t.Setenv("JOG_AS_GIT", "1")
-	defer os.Unsetenv("JOG_AS_GIT")
-	return runJogStdin(t, dir, "", args...)
+	return runJogStdin(t, dir, "", append([]string{"git"}, args...)...)
 }
 
 func runJogStdin(t *testing.T, dir, stdin string, args ...string) (stdout, stderr string, code int) {
@@ -190,8 +188,8 @@ func TestHelp(t *testing.T) {
 	}
 }
 
-// D9: typed as `git`, jog verbs don't exist — everything passes through to
-// real git, still snapshotting causally first.
+// D10: through the alias (`jog git …`), jog verbs don't exist — everything
+// passes through to real git, still snapshotting causally first.
 func TestAsGitIsPurePassthrough(t *testing.T) {
 	tr := testrepo.New(t)
 	tr.Write("a.txt", "x\n")

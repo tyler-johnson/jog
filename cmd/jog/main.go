@@ -1,14 +1,14 @@
 // jog — a memory for your working tree.
 //
-// Two entry modes (docs/PLAN-V0.md D9):
+// Two entry modes (docs/PLAN-V0.md D10):
 //
-//   - As `git` (the alias exports JOG_AS_GIT=1): pure passthrough — every
-//     invocation snapshots and execs real git. No jog verbs exist here, so
-//     collision with any git subcommand, alias, or future addition is
-//     structurally impossible.
-//   - As `jog`: reserved verbs are handled by jog; anything else snapshots
-//     and execs real git (works without the alias too). Verbs beyond the v0
-//     set are reserved now so adding them later changes nothing.
+//   - `jog git …` (what `alias git='jog git'` produces, jj-style): pure
+//     passthrough, forever — snapshot, then exec real git with the rest of
+//     the args, zero verb matching. Collision with any git subcommand, user
+//     alias, or future git addition is structurally impossible.
+//   - Other `jog` verbs are jog's own; anything unreserved also snapshots
+//     and execs real git, so jog works without the alias too. Verbs beyond
+//     the v0 set are reserved now so adding them later changes nothing.
 package main
 
 import (
@@ -27,12 +27,13 @@ usage:
   jog back <path> [--at T]  restore one file from a snapshot
   jog back --all --at T     restore the whole working tree
   jog hook claude           Claude Code hook entry point (reads JSON on stdin)
-  jog <any git command>     snapshot, then run the real git command
+  jog git <args>            snapshot, then run the real git command
+  jog <any git command>     same, for anything jog doesn't reserve
 
 reserved for future releases: since, pick, trim, mcp, doctor
 
 Install the alias so every git command snapshots first:
-  alias git='JOG_AS_GIT=1 jog'
+  alias git='jog git'
 `
 
 func main() {
@@ -40,17 +41,12 @@ func main() {
 }
 
 func run(args []string) int {
-	// Typed as `git` (the alias exports JOG_AS_GIT=1): pure passthrough,
-	// always — snapshot, then exec real git, with zero verb matching. jog's
-	// own verbs exist only behind a directly typed `jog` (D9), so no git
-	// invocation, present or future, can ever collide with them.
-	if os.Getenv("JOG_AS_GIT") != "" {
-		return cli.Passthrough(args)
-	}
 	if len(args) == 0 {
 		return cli.Snapshot("")
 	}
 	switch args[0] {
+	case "git":
+		return cli.Passthrough(args[1:])
 	case "-m":
 		// Not a git global flag (`git -m` is an error), so safe to reserve.
 		if len(args) < 2 {

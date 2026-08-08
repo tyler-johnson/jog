@@ -217,23 +217,25 @@ stays clean and future-us knows what was chosen and why.
   aliases*; with `alias git=jog`, a jog-reserved `st` would intercept
   `git st` before git's alias machinery sees it — the exact collision the
   reserved-verb rule exists to prevent.
-- **D8 — invocation-aware help via the alias.** The alias is
-  `alias git='JOG_AS_GIT=1 jog'`: with the marker set, `help`/`-h`/`--help`
-  pass through to real git (shim transparency, same principle as D7);
-  typed directly, `jog -h` prints jog's own usage. The env var — not
-  argv[0] — carries the distinction, because a plain alias substitution
-  leaves argv[0] identical either way, and a git-named symlink on disk is
-  exactly what DESIGN §5 forbids.
-- **D9 — as `git`, pure passthrough; jog verbs only behind `jog`.**
-  Generalizes D8 to the whole grammar: with JOG_AS_GIT set, *every*
-  invocation snapshots and execs real git — no verb matching at all. This
-  makes collision with git subcommands, user aliases, or future git
-  additions structurally impossible (amends DESIGN §5's "reserved verbs
-  chosen to avoid collision" — the namespaces no longer touch), and it
-  makes D7's `st` concern moot, though `since` stays the better name.
-  Direct `jog <non-verb>` still passes through, so jog works without the
-  alias too. Consequence: `git -m "msg"` is git's error, not a manual
-  snapshot — deliberate checkpoints are `jog` / `jog -m`.
+- **D8 — invocation-aware help** *(superseded by D10's mechanism)*: typed
+  directly, `jog -h` prints jog's usage; through the alias, help reaches
+  real git. First implemented with a `JOG_AS_GIT=1` env marker in the alias.
+- **D9 — as `git`, pure passthrough; jog verbs only behind `jog`**
+  *(semantics live on in D10)*: through the alias, *every* invocation
+  snapshots and execs real git — no verb matching at all. Collision with
+  git subcommands, user aliases, or future git additions is structurally
+  impossible (amends DESIGN §5's "reserved verbs chosen to avoid collision"
+  — the namespaces no longer touch), and D7's `st` concern is moot.
+  Consequence: `git -m "msg"` is git's error; deliberate checkpoints are
+  `jog` / `jog -m`.
+- **D10 — the alias is `alias git='jog git'` (jj-style).** `git` is a
+  reserved jog verb meaning "pure passthrough of the rest, forever" — the
+  alias substitutes the command word, so the verb itself marks how jog was
+  invoked. Beats the D8/D9 env marker (which leaks into child processes: a
+  git hook invoking `jog` would wrongly passthrough) and a second binary
+  (build/install weight); one mechanism, portable to any shell, and safe —
+  bash aliases don't recurse on their own name. `jog git` must never grow
+  interop subcommands (v2's backup push gets its own verb).
 
 ## 5. Test matrix
 
