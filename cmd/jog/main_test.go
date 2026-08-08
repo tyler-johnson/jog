@@ -1082,3 +1082,47 @@ func TestHookSetup(t *testing.T) {
 		t.Errorf("bad subcommand: code=%d stderr=%q", code, stderr)
 	}
 }
+
+// TestPerCommandHelp: every jog verb answers --help and `jog help <verb>`
+// with a usage block — except git, where every argument (including
+// --help) belongs to real git. (TestHelp covers the global forms.)
+func TestPerCommandHelp(t *testing.T) {
+	dir := t.TempDir() // outside any repo: help must not need one
+	verbs := []string{"snaps", "since", "back", "pick", "trim", "doctor", "hook", "skill"}
+	for _, v := range verbs {
+		stdout, _, code := runJog(t, dir, v, "--help")
+		if code != 0 || !strings.Contains(stdout, "usage:") || !strings.Contains(stdout, v) {
+			t.Errorf("%s --help: code=%d\n%s", v, code, stdout)
+		}
+		short, _, code := runJog(t, dir, v, "-h")
+		if code != 0 || short != stdout {
+			t.Errorf("%s -h differs from --help (code=%d)", v, code)
+		}
+		byName, _, code := runJog(t, dir, "help", v)
+		if code != 0 || byName != stdout {
+			t.Errorf("help %s differs from %s --help (code=%d)", v, v, code)
+		}
+	}
+
+	// The flag wins even mixed into other arguments.
+	stdout, _, code := runJog(t, dir, "back", "some/path", "--help")
+	if code != 0 || !strings.Contains(stdout, "usage:") {
+		t.Errorf("back <path> --help: code=%d\n%s", code, stdout)
+	}
+
+	// git passthrough: --help must reach real git, not jog's help.
+	stdout, _, code = runJog(t, dir, "git", "--help")
+	if code != 0 || !strings.Contains(stdout, "usage: git") || strings.Contains(stdout, "jog git —") {
+		t.Errorf("git --help intercepted: code=%d\n%.200s", code, stdout)
+	}
+	// …its jog-side story lives at `jog help git` instead.
+	stdout, _, code = runJog(t, dir, "help", "git")
+	if code != 0 || !strings.Contains(stdout, "jog git") || !strings.Contains(stdout, "passthrough") {
+		t.Errorf("help git: code=%d\n%s", code, stdout)
+	}
+
+	_, stderr, code := runJog(t, dir, "help", "frobnicate")
+	if code != 2 || !strings.Contains(stderr, "no help") {
+		t.Errorf("help for unknown verb: code=%d stderr=%q", code, stderr)
+	}
+}
