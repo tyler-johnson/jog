@@ -59,12 +59,16 @@ Pick the pitch that fits how you work:
   index, `git log`, teammates, and remotes. Unchanged files cost zero bytes.
   There is no jog database.
 - Snapshots are **command-triggered, causally before the command runs** — the
-  only ordering that protects against `reset --hard` and `checkout -f`. No
-  daemon, no filesystem watcher, no git hooks to install or break.
-- Three triggers: the shell alias (every git command you type), agent hooks —
-  Claude Code, Codex, Copilot, Cursor, Gemini CLI, OpenCode — before every
-  prompt and mutating tool call, and `jog` itself (deliberate checkpoints).
-  A no-op snapshot costs a few tens of milliseconds.
+  only ordering that protects against `reset --hard` and `checkout -f`.
+  (Editor save hooks are the one post-state exception: there the saved
+  state *is* the checkpoint.) No daemon, no filesystem watcher, no git
+  hooks to install or break.
+- Four triggers: the shell alias (every git command you type), agent hooks
+  (Claude Code, Codex, Copilot, Cursor, Gemini CLI, OpenCode — before
+  every prompt and mutating tool call), editor save hooks (vim, emacs,
+  VS Code, JetBrains, and more — every save becomes a checkpoint), and
+  `jog` itself (deliberate checkpoints). A no-op snapshot costs a few
+  tens of milliseconds.
 - jog never reimplements a git verb, and never touches your index, HEAD,
   branches, or config. If jog vanished tomorrow, stock git reads every
   snapshot ([see below](#no-lock-in)).
@@ -104,14 +108,16 @@ Scripts, IDEs, and CI are untouched — they resolve `git` on PATH and get real
 git. That's a feature: jog stays out of every code path that expects exact
 git behavior.
 
-**3. Wire up your agents** (optional):
+**3. Wire up your agents and editors** (optional):
 
 ```sh
-jog agents install   # hooks + skill for every agent client on this machine
+jog agents install        # hooks + skill for every agent client on this machine
+jog editors install vim   # a post-save hook for your editor, one at a time
 ```
 
-The [Agents](#agents) section below has the full picture — which clients
-are supported, where the wiring lands, and what each surface does.
+The [Agents](#agents) and [Editors](#editors) sections below have the
+full picture — what's supported, where the wiring lands, and what each
+surface does.
 
 **4. Verify:** make any change in a repo, run `git status`, then `jog log`
 — you should see a `pre: git status` entry.
