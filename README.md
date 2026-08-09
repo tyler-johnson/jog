@@ -25,8 +25,9 @@ restored to c0ffee1 (2 minutes ago — pre: git status): 14 restored, 0 deleted
 ```
 
 On a terminal, `jog log` opens the timeline as an interactive browser —
-scrub with a live diff preview, press `r` to restore the tree (after a
-y/n confirm). Piped, it prints the plain list shown above.
+scrub with a live diff preview, enter reads the diff, `r` restores the
+tree after a y/n confirm. Short windows (a phone SSH session) show one
+frame at a time. Piped, it prints the plain list shown above.
 
 ## Why jog
 
@@ -195,12 +196,15 @@ Anything else is an error — jog never guesses.
 
 ## Recovery cookbook
 
-**An agent deleted a file three prompts ago.** Find it, get it back:
+**An agent deleted a file three prompts ago.** `jog log src/config.yaml`
+opens the browser scoped to the file — scrub to the version you want and
+press `r`. Or entirely from the prompt:
 
 ```console
-$ jog log src/config.yaml
+$ jog log src/config.yaml | head    # piped: the plain list
 f3a9b12  8 minutes ago  claude[b3f1a2c4]: Bash(rm -rf src/old)
-D       src/config.yaml
+
+D	src/config.yaml
 $ jog restore src/config.yaml --at 9m
 restored src/config.yaml from 2c4d6e8 (9 minutes ago — claude[b3f1a2c4]: prompt "clean up the src tree")
 ```
@@ -220,8 +224,8 @@ Every restore snapshots first, so undo is itself undoable.
 
 ```console
 $ jog since 1h           # per-file summary since the snapshot nearest 1h ago
-$ jog log -p           # full patches, in your pager
-$ jog log src/parser/  # just one path's history
+$ jog log -p             # full patches, in your pager
+$ jog log src/parser/    # just one path's history
 ```
 
 **Find the version of one file where it still worked**, scrubbing visually:
@@ -333,8 +337,9 @@ validated through git's own parsers:
 
 ## Roadmap
 
-- **shipped:** snapshot engine, `snaps` (+ `--all` forest view), `since`,
-  `back`, `pick`, `trim` + tapering retention, `doctor`, agent integrations
+- **shipped:** snapshot engine, `log` (interactive timeline browser; `--all`
+  forest view; `--json` and `--format` for scripts and agents), `since`,
+  `restore`, `trim` + tapering retention, `doctor`, agent integrations
   for Claude Code, Codex, Copilot, Cursor, Gemini CLI, and OpenCode (hooks,
   agent skills, once-per-session notice), brew tap.
 - **next:** automatic trim (piggybacked, at most daily — after the manual
