@@ -85,7 +85,7 @@ func hookInstall(path string, project bool) int {
 		fmt.Println("   a committed hook would break for teammates without jog installed)")
 	}
 	fmt.Println("Claude Code snapshots this way before every prompt and tool call.")
-	fmt.Println("`jog hook claude uninstall` reverses this exactly; `jog doctor` verifies it.")
+	fmt.Println("`jog hook claude uninstall` removes it; `jog doctor` verifies the wiring.")
 	return 0
 }
 

@@ -124,7 +124,7 @@ absolute path instead — and tells you so.)
 `--project` scopes either command to the current repo: hooks go to the
 personal `.claude/settings.local.json` (a committed hook command would
 break for teammates without jog), the skill to the committable
-`.claude/skills/`. `uninstall` reverses exactly what install wrote and
+`.claude/skills/`. `uninstall` removes exactly what install wrote and
 touches nothing else.
 
 Once the hooks are wired, jog introduces itself to Claude once per session
@@ -152,7 +152,7 @@ Two disjoint namespaces, one rule: **`jog git` is the only door to git.**
 | `jog pick [--all] <path>` | scrub through a file's versions — list, preview, enter to restore (`q` leaves everything untouched) |
 | `jog trim [--dry-run]` | apply the retention taper; the previous tip stays at `refs/jog/@trash/<branch>` until the next trim |
 | `jog doctor [--fix]` | verify invariants, wiring, and liveness (`--fix` repairs the gc config) |
-| `jog hook claude install` | wire the Claude Code hooks (`uninstall` reverses it; `--project`: this repo only) |
+| `jog hook claude install` | wire the Claude Code hooks (`uninstall` removes it; `--project`: this repo only) |
 | `jog skill claude install` | install the Claude Code skill that teaches agents the recovery workflow (`uninstall`, `--print`; `--project`: this repo) |
 | `jog version` | print jog's version |
 

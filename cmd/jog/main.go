@@ -29,7 +29,7 @@ usage:
   jog back <path> [--at T]  restore one file from a snapshot
   jog back --all --at T     restore the whole working tree
   jog hook claude           Claude Code hook entry point (reads JSON on stdin)
-  jog hook claude install   wire the hooks into Claude Code settings (uninstall reverses; --project: this repo)
+  jog hook claude install   wire the hooks into Claude Code settings (uninstall removes; --project: this repo)
   jog skill claude install  install the Claude Code skill (uninstall, --print; --project: this repo)
   jog git <args>            snapshot, then run the real git command
   jog pick [--all] <path>   scrub through a file's versions and restore one
