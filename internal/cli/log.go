@@ -288,10 +288,10 @@ func logTUI(repo *gitx.Repo, all bool, ranges, paths []string, limit string) int
 		return 0
 	}
 
-	title := "snapshots on every chain — r restores, q leaves everything untouched"
+	// The footer owns the hotkeys; the title just says where you are.
+	title := "snapshots on every chain"
 	if !all {
-		title = fmt.Sprintf("snapshots on %s — r restores, q leaves everything untouched",
-			strings.TrimPrefix(chainRef(repo), "refs/jog/"))
+		title = "snapshots on " + strings.TrimPrefix(chainRef(repo), "refs/jog/")
 	}
 	confirm := "restore the whole tree to %s? y/n"
 	if len(paths) > 0 {
