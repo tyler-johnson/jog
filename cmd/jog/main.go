@@ -57,15 +57,12 @@ call) and a skill (teaches the agent the recovery workflow — find
 versions, restore, checkpoint before risk). install covers both for
 every client detected on this machine and skips the rest; name a
 surface or a client to narrow it. list shows every supported client
-and what is installed. supported clients: claude (Claude Code), codex.
+and what is installed.
 
-Claude hooks are wired into ~/.claude/settings.json (with --project,
-the repo's personal .claude/settings.local.json); Codex hooks use
-~/.codex/hooks.json (with --project, .codex/hooks.json). Skills install
-to ~/.claude/skills/jog/ for Claude and ~/.agents/skills/jog/ for Codex;
---project uses the corresponding committable repo directories. Existing
-JSON fields are preserved, malformed JSON is never rewritten, and
-uninstall refuses to delete a skill file carrying local edits.
+The default scope is the home directory, so the wiring covers every
+repo; --project scopes it to the current repo instead. Existing JSON
+fields are preserved, malformed JSON is never rewritten, and uninstall
+refuses to delete a skill file carrying local edits.
 `
 
 // helpTexts is the per-command help behind `jog <cmd> --help` and
