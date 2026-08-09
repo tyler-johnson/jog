@@ -234,8 +234,8 @@ repos (all snapshots inside keep-all; correctly nothing to drop).
 - [x] README: brew + releases-page install, `since`/`pick`/`trim`/`doctor`
       in the usage table, cookbook entries for since/pick/trim, roadmap
       flipped to shipped/next, status callout updated to 0.x.
-- [ ] `brew install tyler-johnson/tap/jog` on a clean machine — needs a
-      brew host (no brew on the Pi); carried by the exit checklist.
+- [x] `brew install tyler-johnson/tap/jog` on a clean machine — verified
+      by Tyler, 2026-08-09 (formula at 1.1.0 by then).
 
 ## 4. Forced decisions (beyond DESIGN.md)
 
@@ -356,8 +356,9 @@ property tests.
 - [ ] `pick` used in anger for at least one real recovery or comparison
       *(TUI itself verified interactively 2026-08-08 — what remains is an
       organic use, not a functionality check)*
-- [ ] `brew install tyler-johnson/tap/jog` on a clean machine → alias +
+- [x] `brew install tyler-johnson/tap/jog` on a clean machine → alias +
       hooks → first snapshot, using only README + caveats text
+      *(verified by Tyler, 2026-08-09)*
 - [x] Tagged release with binaries for linux/darwin × amd64/arm64
       (v1.0.0, 2026-08-08; released arm64 binary + `go install @v1.0.0`
       both verified)
