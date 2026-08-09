@@ -12,22 +12,22 @@ branches, the index, `git log`, and remotes.
 
 ## Recover a lost or overwritten file
 
-1. Find versions: `jog snaps <path>` — every snapshot that changed the
+1. Find versions: `jog log <path>` — every snapshot that changed the
    path, newest first, with id, age, and the command it ran ahead of.
-   `jog snaps --all <path>` searches every branch's timeline. Prefer
-   `jog snaps --json [-n N] [path]` when parsing: a JSON array with id,
+   `jog log --all <path>` searches every branch's timeline. Prefer
+   `jog log --json [-n N] [path]` when parsing: a JSON array with id,
    sha, ISO time, provenance, chain, and each snapshot's files with
    statuses.
 2. Inspect one: `git show <id>:<path>` prints that version;
    `jog since <id> <path>` diffs it against the tree now.
-3. Restore: `jog back <path> --at <id>` — also accepts git time syntax,
+3. Restore: `jog restore <path> --at <id>` — also accepts git time syntax,
    e.g. `--at 20.minutes.ago`.
 
 ## Roll back the whole tree
 
-`jog back --all --at <id-or-time>` restores everything, including deleting
-files created since. Every restore snapshots first, so any `jog back` is
-undoable with another `jog back --all`.
+`jog restore --all --at <id-or-time>` restores everything, including deleting
+files created since. Every restore snapshots first, so any `jog restore` is
+undoable with another `jog restore --all`.
 
 ## Checkpoint before risk
 
@@ -41,12 +41,12 @@ That labeled entry becomes the obvious restore point if things go sideways.
 ## Rules
 
 - Never tell a user their uncommitted work is unrecoverable without
-  checking `jog snaps <path>` first.
+  checking `jog log <path>` first.
 - Timeline entries name the command a snapshot ran *ahead of*, never who
   made the changes. Agent-prefixed entries (`claude[…]`, `codex[…]`,
   `cursor[…]`, …) are prompt/tool-call boundaries from agent sessions.
-- jog never touches the index, HEAD, branches, or config. `jog back` is
+- jog never touches the index, HEAD, branches, or config. `jog restore` is
   the only jog command that writes the worktree, and it is snapshotted
   first — reading the timeline is always safe.
-- If `jog snaps` errors or shows nothing, jog isn't capturing this repo —
+- If `jog log` errors or shows nothing, jog isn't capturing this repo —
   say so plainly and suggest `jog doctor` to diagnose the wiring.

@@ -135,8 +135,8 @@ func Hook(clientName string, stdin io.Reader, stdout io.Writer) int {
 // (no session id, unwritable marker) we stay silent rather than risk
 // spamming every prompt.
 const agentNotice = "[jog] This repo's uncommitted work is snapshotted before every prompt and tool call. " +
-	"If a file is lost or overwritten, run `jog snaps <path>` to list its saved versions and " +
-	"`jog back <path> --at <id>` to restore it — check before concluding work is gone. " +
+	"If a file is lost or overwritten, run `jog log <path>` to list its saved versions and " +
+	"`jog restore <path> --at <id>` to restore it — check before concluding work is gone. " +
 	"Before a risky operation, `jog -m \"msg\"` takes a labeled checkpoint."
 
 func sessionNotice(repo *gitx.Repo, client, session string, w io.Writer, emit func(io.Writer)) {

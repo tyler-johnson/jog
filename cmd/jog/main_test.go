@@ -173,9 +173,9 @@ func TestPassthroughSnapshotsBeforeDestruction(t *testing.T) {
 	}
 }
 
-// Matrix row 15 — jog back: worktree-only restores, index byte-identical,
+// Matrix row 15 — jog restore: worktree-only restores, index byte-identical,
 // --all deletes files added since the target, restores are undoable.
-func TestBack(t *testing.T) {
+func TestRestore(t *testing.T) {
 	tr := testrepo.New(t)
 	tr.Write("a.txt", "committed\n")
 	tr.Commit("first")
@@ -189,7 +189,7 @@ func TestBack(t *testing.T) {
 	idx := tr.IndexBytes()
 
 	// Single file, default target (newest snapshot at command start).
-	stdout, stderr, code := runJog(t, tr.Dir, "back", "a.txt")
+	stdout, stderr, code := runJog(t, tr.Dir, "restore", "a.txt")
 	if code != 0 {
 		t.Fatalf("back a.txt: %d %s", code, stderr)
 	}
@@ -205,13 +205,13 @@ func TestBack(t *testing.T) {
 	}
 
 	// Undo the undo: default target is now the pre-restore snapshot.
-	runJog(t, tr.Dir, "back", "a.txt")
+	runJog(t, tr.Dir, "restore", "a.txt")
 	if got, _ := os.ReadFile(filepath.Join(tr.Dir, "a.txt")); string(got) != "version two\n" {
 		t.Errorf("undo-of-undo: a.txt = %q", got)
 	}
 
 	// Deleted untracked file, restored by name.
-	if _, _, code := runJog(t, tr.Dir, "back", "u.txt", "--at", "@{2}"); code != 0 {
+	if _, _, code := runJog(t, tr.Dir, "restore", "u.txt", "--at", "@{2}"); code != 0 {
 		t.Fatal("back u.txt failed")
 	}
 	if got, _ := os.ReadFile(filepath.Join(tr.Dir, "u.txt")); string(got) != "untracked treasure\n" {
@@ -232,7 +232,7 @@ func TestBack(t *testing.T) {
 		t.Fatal("could not find target snapshot id")
 	}
 	idx = tr.IndexBytes()
-	stdout, stderr, code = runJog(t, tr.Dir, "back", "--all", "--at", target)
+	stdout, stderr, code = runJog(t, tr.Dir, "restore", "--all", "--at", target)
 	if code != 0 {
 		t.Fatalf("back --all: %d %s", code, stderr)
 	}
@@ -253,15 +253,15 @@ func TestBack(t *testing.T) {
 	}
 
 	// Undo of --all brings new.txt back.
-	runJog(t, tr.Dir, "back", "--all")
+	runJog(t, tr.Dir, "restore", "--all")
 	if _, err := os.Stat(filepath.Join(tr.Dir, "new.txt")); err != nil {
 		t.Error("undo of --all did not restore new.txt")
 	}
 }
 
-// back refuses non-snapshot targets and bad grammar; reflog time syntax
+// restore refuses non-snapshot targets and bad grammar; reflog time syntax
 // falls back to oldest past the horizon (verified git behavior).
-func TestBackGuards(t *testing.T) {
+func TestRestoreGuards(t *testing.T) {
 	tr := testrepo.New(t)
 	tr.Write("a.txt", "oldest\n")
 	tr.Commit("first")
@@ -272,16 +272,16 @@ func TestBackGuards(t *testing.T) {
 	tr.Write("a.txt", "dirty\n")
 
 	// HEAD is a real commit, not a snapshot.
-	_, stderr, code := runJog(t, tr.Dir, "back", "a.txt", "--at", "HEAD")
+	_, stderr, code := runJog(t, tr.Dir, "restore", "a.txt", "--at", "HEAD")
 	if code != 1 || !strings.Contains(stderr, "not a jog snapshot") {
 		t.Errorf("--at HEAD: code=%d stderr=%q", code, stderr)
 	}
 	// --all plus paths is a grammar error.
-	if _, _, code := runJog(t, tr.Dir, "back", "--all", "a.txt"); code != 2 {
+	if _, _, code := runJog(t, tr.Dir, "restore", "--all", "a.txt"); code != 2 {
 		t.Errorf("--all with paths: code=%d", code)
 	}
 	// A time past the oldest entry falls back to oldest, exit 0.
-	_, _, code = runJog(t, tr.Dir, "back", "a.txt", "--at", "30.minutes.ago")
+	_, _, code = runJog(t, tr.Dir, "restore", "a.txt", "--at", "30.minutes.ago")
 	if code != 0 {
 		t.Fatalf("past-oldest time query exited %d", code)
 	}
@@ -369,7 +369,7 @@ func TestAsGitIsPurePassthrough(t *testing.T) {
 // Matrix row 16 + M5: the timeline shows all snapshots, newest first, stops
 // at the real-history boundary, filters by path, and snapshots before
 // reading (jj-style).
-func TestSnaps(t *testing.T) {
+func TestLog(t *testing.T) {
 	tr := testrepo.New(t)
 	tr.Write("a.txt", "one\n")
 	tr.Commit("real history commit")
@@ -378,9 +378,9 @@ func TestSnaps(t *testing.T) {
 	tr.Write("b.txt", "new\n")
 	runJog(t, tr.Dir, "-m", "checkpoint two")
 
-	stdout, stderr, code := runJog(t, tr.Dir, "snaps")
+	stdout, stderr, code := runJog(t, tr.Dir, "log")
 	if code != 0 {
-		t.Fatalf("snaps exited %d: %s", code, stderr)
+		t.Fatalf("log exited %d: %s", code, stderr)
 	}
 	if !strings.Contains(stdout, "manual: checkpoint one") || !strings.Contains(stdout, "manual: checkpoint two") {
 		t.Errorf("timeline missing snapshots:\n%s", stdout)
@@ -399,20 +399,20 @@ func TestSnaps(t *testing.T) {
 	// Piped output stays the plain git log passthrough — ids and provenance
 	// with no ANSI styling; the interactive browser only appears on a TTY.
 	if strings.Contains(stdout, "\x1b[") {
-		t.Errorf("piped snaps output carries ANSI escapes:\n%s", stdout)
+		t.Errorf("piped log output carries ANSI escapes:\n%s", stdout)
 	}
 	if id := tr.Git("rev-parse", "--short", "refs/jog/main"); !strings.Contains(stdout, id) {
-		t.Errorf("piped snaps output missing snapshot id %s:\n%s", id, stdout)
+		t.Errorf("piped log output missing snapshot id %s:\n%s", id, stdout)
 	}
 
 	// Path filter: only entries touching b.txt.
-	stdout, _, _ = runJog(t, tr.Dir, "snaps", "b.txt")
+	stdout, _, _ = runJog(t, tr.Dir, "log", "b.txt")
 	if !strings.Contains(stdout, "checkpoint two") || strings.Contains(stdout, "checkpoint one") {
 		t.Errorf("path filter wrong:\n%s", stdout)
 	}
 
 	// -p appends patches.
-	stdout, _, _ = runJog(t, tr.Dir, "snaps", "-p")
+	stdout, _, _ = runJog(t, tr.Dir, "log", "-p")
 	if !strings.Contains(stdout, "diff --git") || !strings.Contains(stdout, "+new") {
 		t.Errorf("-p missing patches:\n%s", stdout)
 	}
@@ -420,9 +420,9 @@ func TestSnaps(t *testing.T) {
 	// Reading snapshots first: a dirty tree lands on the timeline before
 	// it is displayed.
 	tr.Write("a.txt", "three\n")
-	stdout, _, _ = runJog(t, tr.Dir, "snaps")
-	if !strings.Contains(stdout, "pre: jog snaps") {
-		t.Errorf("snaps did not snapshot before reading:\n%s", stdout)
+	stdout, _, _ = runJog(t, tr.Dir, "log")
+	if !strings.Contains(stdout, "pre: jog log") {
+		t.Errorf("log did not snapshot before reading:\n%s", stdout)
 	}
 }
 
@@ -430,7 +430,7 @@ func TestSnaps(t *testing.T) {
 // agent needs (ids, times, provenance, chain, files) without touching
 // refs/jog/* itself; -n limits; --format hands the rendering to git with
 // nothing appended; incompatible combinations fail loudly.
-func TestSnapsMachineOutput(t *testing.T) {
+func TestLogMachineOutput(t *testing.T) {
 	tr := testrepo.New(t)
 	tr.Write("a.txt", "one\n")
 	tr.Commit("real history commit")
@@ -439,16 +439,16 @@ func TestSnapsMachineOutput(t *testing.T) {
 	tr.Write("b.txt", "new\n")
 	runJog(t, tr.Dir, "-m", "checkpoint two")
 
-	stdout, stderr, code := runJog(t, tr.Dir, "snaps", "--json")
+	stdout, stderr, code := runJog(t, tr.Dir, "log", "--json")
 	if code != 0 {
-		t.Fatalf("snaps --json exited %d: %s", code, stderr)
+		t.Fatalf("log --json exited %d: %s", code, stderr)
 	}
 	var entries []struct {
 		ID, SHA, Time, Age, Chain, Provenance string
 		Files                                 []struct{ Status, Path string }
 	}
 	if err := json.Unmarshal([]byte(stdout), &entries); err != nil {
-		t.Fatalf("snaps --json is not valid JSON: %v\n%s", err, stdout)
+		t.Fatalf("log --json is not valid JSON: %v\n%s", err, stdout)
 	}
 	if len(entries) != 2 {
 		t.Fatalf("want 2 entries, got %d:\n%s", len(entries), stdout)
@@ -468,20 +468,20 @@ func TestSnapsMachineOutput(t *testing.T) {
 	}
 
 	// -n limits, and an empty result is an empty array, not prose.
-	stdout, _, _ = runJog(t, tr.Dir, "snaps", "--json", "-n", "1")
+	stdout, _, _ = runJog(t, tr.Dir, "log", "--json", "-n", "1")
 	if strings.Count(stdout, `"sha"`) != 1 {
 		t.Errorf("-n 1 did not limit:\n%s", stdout)
 	}
-	stdout, _, _ = runJog(t, tr.Dir, "snaps", "--json", "nonexistent.txt")
+	stdout, _, _ = runJog(t, tr.Dir, "log", "--json", "nonexistent.txt")
 	if strings.TrimSpace(stdout) != "[]" {
 		t.Errorf("empty JSON result = %q, want []", stdout)
 	}
 
 	// --format owns the output: exactly one line per snapshot, no
 	// name-status appended, no ANSI.
-	stdout, _, code = runJog(t, tr.Dir, "snaps", "--format=%h %s")
+	stdout, _, code = runJog(t, tr.Dir, "log", "--format=%h %s")
 	if code != 0 {
-		t.Fatalf("snaps --format exited %d", code)
+		t.Fatalf("log --format exited %d", code)
 	}
 	lines := strings.Split(strings.TrimSpace(stdout), "\n")
 	if len(lines) != 2 || !strings.HasSuffix(lines[0], "manual: checkpoint two") ||
@@ -491,10 +491,10 @@ func TestSnapsMachineOutput(t *testing.T) {
 
 	// Loud grammar failures, exit 2.
 	for _, bad := range [][]string{
-		{"snaps", "--json", "-p"},
-		{"snaps", "--json", "--format=%h"},
-		{"snaps", "-n", "potato"},
-		{"snaps", "-n"},
+		{"log", "--json", "-p"},
+		{"log", "--json", "--format=%h"},
+		{"log", "-n", "potato"},
+		{"log", "-n"},
 	} {
 		if _, stderr, code := runJog(t, tr.Dir, bad...); code != 2 || stderr == "" {
 			t.Errorf("%v: code=%d stderr=%q, want loud exit 2", bad, code, stderr)
@@ -655,7 +655,7 @@ func TestSinceGrammar(t *testing.T) {
 // TestSnapsAll covers matrix row 23: the forest view interleaves every
 // chain with per-chain attribution, and per-chain boundaries keep real
 // history out.
-func TestSnapsAll(t *testing.T) {
+func TestLogAll(t *testing.T) {
 	tr := testrepo.New(t)
 	tr.Write("a.txt", "one\n")
 	tr.Commit("real history commit")
@@ -664,7 +664,7 @@ func TestSnapsAll(t *testing.T) {
 	tr.Write("f.txt", "feat\n")
 	runJog(t, tr.Dir, "-m", "on feat")
 
-	stdout, stderr, code := runJog(t, tr.Dir, "snaps", "--all")
+	stdout, stderr, code := runJog(t, tr.Dir, "log", "--all")
 	if code != 0 {
 		t.Fatalf("snaps --all exited %d: %s", code, stderr)
 	}
@@ -944,10 +944,9 @@ func TestTrim(t *testing.T) {
 	}
 }
 
-// TestPick covers matrix row 31's e2e face: without a TTY the version list
-// prints plainly — the same rows the TUI shows — restricted to snapshots
-// that actually changed the file, and it must agree with `jog snaps <path>`.
-func TestPick(t *testing.T) {
+// TestVerbAliases: snaps and pick are log, back is restore — same code
+// path, same output — and provenance records the verb the user typed.
+func TestVerbAliases(t *testing.T) {
 	tr := testrepo.New(t)
 	tr.Write("a.txt", "one\n")
 	tr.Write("other.txt", "x\n")
@@ -958,25 +957,44 @@ func TestPick(t *testing.T) {
 	tr.Write("a.txt", "two\n")
 	runJog(t, tr.Dir, "-m", "touches a again")
 
-	stdout, stderr, code := runJog(t, tr.Dir, "pick", "a.txt")
+	// The path-scoped timeline (pick's old job) via each verb, on a clean
+	// tree so no run mints a snapshot: byte-identical output.
+	want, stderr, code := runJog(t, tr.Dir, "log", "--format=%H %s", "a.txt")
 	if code != 0 {
-		t.Fatalf("pick exited %d: %s", code, stderr)
+		t.Fatalf("log exited %d: %s", code, stderr)
 	}
-	if !strings.Contains(stdout, "touches a again") || !strings.Contains(stdout, "manual: touches a") {
-		t.Errorf("pick list missing a.txt versions:\n%s", stdout)
+	if !strings.Contains(want, "touches a again") || !strings.Contains(want, "touches a") {
+		t.Errorf("log list missing a.txt versions:\n%s", want)
 	}
-	if strings.Contains(stdout, "touches other only") {
-		t.Errorf("pick listed a snapshot that did not change the file:\n%s", stdout)
+	if strings.Contains(want, "touches other only") {
+		t.Errorf("log listed a snapshot that did not change the file:\n%s", want)
+	}
+	for _, alias := range []string{"snaps", "pick"} {
+		got, _, code := runJog(t, tr.Dir, alias, "--format=%H %s", "a.txt")
+		if code != 0 || got != want {
+			t.Errorf("%s output differs from log (code=%d):\n%s", alias, code, got)
+		}
 	}
 
-	stdout, _, _ = runJog(t, tr.Dir, "pick", "missing.txt")
-	if !strings.Contains(stdout, "no snapshots touch") {
-		t.Errorf("pick on untouched path:\n%s", stdout)
+	// A dirty tree run records the typed verb in provenance.
+	tr.Write("a.txt", "three\n")
+	runJog(t, tr.Dir, "snaps", "-n", "1", "--format=%h")
+	if got := tr.Git("log", "-1", "--format=%s", "refs/jog/main"); got != "pre: jog snaps -n 1 --format=%h" {
+		t.Errorf("alias provenance = %q, want the typed verb", got)
 	}
 
-	_, stderr, code = runJog(t, tr.Dir, "pick")
-	if code != 2 || !strings.Contains(stderr, "usage") {
-		t.Errorf("pick without path: code=%d stderr=%q", code, stderr)
+	// back restores like restore, and the undo hint speaks restore. A dirty
+	// tree, so the mandatory pre-restore snapshot records the typed verb.
+	tr.Write("a.txt", "four\n")
+	stdout, stderr, code := runJog(t, tr.Dir, "back", "a.txt")
+	if code != 0 {
+		t.Fatalf("back exited %d: %s", code, stderr)
+	}
+	if !strings.Contains(stdout, "restored a.txt") || !strings.Contains(stdout, "undo: jog restore a.txt") {
+		t.Errorf("back alias output:\n%s", stdout)
+	}
+	if got := tr.Git("log", "-1", "--format=%s", "refs/jog/main"); got != "pre: jog back a.txt" {
+		t.Errorf("back provenance = %q, want the typed verb", got)
 	}
 }
 
@@ -985,7 +1003,7 @@ func TestPick(t *testing.T) {
 // --help) belongs to real git. (TestHelp covers the global forms.)
 func TestPerCommandHelp(t *testing.T) {
 	dir := t.TempDir() // outside any repo: help must not need one
-	verbs := []string{"snaps", "since", "back", "pick", "trim", "config", "doctor", "hook", "agents", "agent"}
+	verbs := []string{"log", "snaps", "pick", "since", "restore", "back", "trim", "config", "doctor", "hook", "agents", "agent"}
 	for _, v := range verbs {
 		stdout, _, code := runJog(t, dir, v, "--help")
 		if code != 0 || !strings.Contains(stdout, "usage:") || !strings.Contains(stdout, v) {
@@ -1052,7 +1070,7 @@ func TestShortTimeTargets(t *testing.T) {
 		t.Errorf("since 1h fell back to the oldest snapshot:\n%s", stdout)
 	}
 
-	if _, stderr, code := runJog(t, tr.Dir, "back", "w.txt", "--at", "2h"); code != 0 {
+	if _, stderr, code := runJog(t, tr.Dir, "restore", "w.txt", "--at", "2h"); code != 0 {
 		t.Fatalf("back --at 2h: code=%d stderr=%s", code, stderr)
 	}
 	if b, _ := os.ReadFile(filepath.Join(tr.Dir, "w.txt")); string(b) != "three hours old\n" {

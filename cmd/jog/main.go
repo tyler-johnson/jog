@@ -23,20 +23,19 @@ import (
 const usage = `jog — a memory for your working tree
 
 usage:
-  jog                       snapshot now
-  jog -m "msg"              snapshot with a message
-  jog snaps [path]          browse snapshots on this branch (piped: plain list; -p, -n, --all, --json, --format)
-  jog since [T] [path]      what changed since a snapshot (default: last command boundary)
-  jog back <path> [--at T]  restore one file from a snapshot
-  jog back --all --at T     restore the whole working tree
-  jog agents install        hooks + skill for every agent client on this machine (uninstall, list; --project)
-  jog hook <client>         agent hook entry point (reads JSON on stdin)
-  jog git <args>            snapshot, then run the real git command
-  jog pick [--all] <path>   scrub through a file's versions and restore one
-  jog trim [--dry-run]      apply the retention taper; drop thinned snapshots
-  jog config [key [value]]  list jog's settings — or get, set (--unset, --global)
-  jog doctor [--fix]        verify invariants, wiring, and liveness
-  jog version               print jog's version
+  jog                          snapshot now
+  jog -m "msg"                 snapshot with a message
+  jog log [path]               browse snapshots on this branch (piped: plain list; -p, -n, --all, --json, --format)
+  jog since [T] [path]         what changed since a snapshot (default: last command boundary)
+  jog restore <path> [--at T]  restore files from a snapshot
+  jog restore --all [--at T]   restore the whole working tree
+  jog agents install           hooks + skill for every agent client on this machine (uninstall, list; --project)
+  jog hook <client>            agent hook entry point (reads JSON on stdin)
+  jog git <args>               snapshot, then run the real git command
+  jog trim [--dry-run]         apply the retention taper; drop thinned snapshots
+  jog config [key [value]]     list jog's settings — or get, set (--unset, --global)
+  jog doctor [--fix]           verify invariants, wiring, and liveness
+  jog version                  print jog's version
 
 reserved for future releases: mcp
 
@@ -66,22 +65,19 @@ fields are preserved, malformed JSON is never rewritten, and uninstall
 refuses to delete a skill file carrying local edits.
 `
 
-// helpTexts is the per-command help behind `jog <cmd> --help` and
-// `jog help <cmd>`. Self-contained by design: someone who has never seen
-// the README should leave each text knowing what the command does and
-// what it will never do.
-var helpTexts = map[string]string{
-	"snaps": `jog snaps — browse the timeline of snapshots on this branch
+// logHelp is shared by log and its aliases snaps and pick.
+const logHelp = `jog log — browse the timeline of snapshots on this branch
 
 usage:
-  jog snaps [-p] [-n <count>] [--all] [--json] [--format=<fmt>] [path…]
+  jog log [-p] [-n <count>] [--all] [--json] [--format=<fmt>] [path…]
 
 Snapshots first (running jog is itself a command boundary), then opens
 the timeline in an interactive browser: every snapshot with its id, age,
-and provenance, the patch previewed as you move. ↑/↓ or j/k to scrub,
-pgup/pgdn (or ctrl+u/ctrl+d) to scroll the preview, enter to restore the
-tree to that snapshot — after a y/n confirmation — and q to leave
-everything untouched. Restores go through jog back, so they are
+and provenance, the diff previewed as you move. Two frames, one focused
+at a time: ↑/↓ (or j/k) move the list, enter focuses the diff so ↑/↓
+scroll it, esc returns to the list. From either frame, r restores the
+tree to the selected snapshot after a y/n confirmation, and q leaves
+everything untouched. Restores go through jog restore, so they are
 snapshotted first and undoable.
 
 Provenance names the command a snapshot ran ahead of — "pre: git status",
@@ -102,8 +98,38 @@ options:
 Piped output (and -p) prints the plain git log rendering: id, age,
 provenance, files changed. --json and --format never open the browser,
 so scripts and agents get everything without touching git's refs
-themselves. Ids feed jog back --at <id> and jog since <id>.
-`,
+themselves. Ids feed jog restore --at <id> and jog since <id>.
+
+snaps and pick are aliases of jog log.
+`
+
+// restoreHelp is shared by restore and its alias back.
+const restoreHelp = `jog restore — restore from a snapshot (worktree only)
+
+usage:
+  jog restore <path>… [--at T]
+  jog restore --all [--at T]
+
+Restores files as they were in a snapshot — by default the newest one;
+--at takes a snap id from jog log or a time: --at 30m, --at 1h,
+--at 2d (or any git date, like yesterday). --all restores the whole
+tree, including deleting files created since the snapshot.
+
+Only the worktree is written: index, HEAD, branches, and staged changes
+stay exactly as they are. Every restore snapshots first, so any jog
+restore is undone by another jog restore.
+
+back is an alias of jog restore.
+`
+
+// helpTexts is the per-command help behind `jog <cmd> --help` and
+// `jog help <cmd>`. Self-contained by design: someone who has never seen
+// the README should leave each text knowing what the command does and
+// what it will never do.
+var helpTexts = map[string]string{
+	"log":   logHelp,
+	"snaps": logHelp,
+	"pick":  logHelp,
 	"since": `jog since — what changed since a snapshot
 
 usage:
@@ -113,7 +139,7 @@ usage:
 Diffs a snapshot against the working tree as it is right now (a fresh
 snapshot is taken first, so untracked files count). Without T the
 baseline is your last command boundary — "what did that change". T is a
-snap id from jog snaps, or a time: 30m, 1h, 2d, 1w — or anything git's
+snap id from jog log, or a time: 30m, 1h, 2d, 1w — or anything git's
 date syntax accepts (yesterday, 2.hours.ago).
 
 options:
@@ -124,36 +150,8 @@ options:
 A first argument naming an existing file is treated as a path, not a
 time; use --at (or --) when a path could be mistaken for a target.
 `,
-	"back": `jog back — restore from a snapshot (worktree only)
-
-usage:
-  jog back <path>… [--at T]
-  jog back --all [--at T]
-
-Restores files as they were in a snapshot — by default the newest one;
---at takes a snap id from jog snaps or a time: --at 30m, --at 1h,
---at 2d (or any git date, like yesterday). --all restores the whole
-tree, including deleting files created since the snapshot.
-
-Only the worktree is written: index, HEAD, branches, and staged changes
-stay exactly as they are. Every restore snapshots first, so any jog back
-is undone by another jog back.
-`,
-	"pick": `jog pick — scrub through one file's versions
-
-usage:
-  jog pick [--all] <path>
-
-Interactive: every snapshot that changed the file, newest first, with
-the diff previewed as you move. ↑/↓ or j/k to scrub, enter to restore
-that version, q to leave everything untouched. Restoring goes through
-jog back, so it is snapshotted and undoable like any other restore.
-
-options:
-  --all   search every branch's chain, not just this branch's
-
-Without a terminal (piped output), prints the version list instead.
-`,
+	"restore": restoreHelp,
+	"back":    restoreHelp,
 	"trim": `jog trim — apply the retention taper
 
 usage:
@@ -271,12 +269,12 @@ func run(args []string) int {
 			return 2
 		}
 		return cli.Snapshot(args[1])
-	case "snaps":
-		return cli.Snaps(args[1:])
+	case "log", "snaps", "pick":
+		return cli.Log(args[0], args[1:])
 	case "since":
 		return cli.Since(args[1:])
-	case "back":
-		return cli.Back(args[1:])
+	case "restore", "back":
+		return cli.Restore(args[0], args[1:])
 	case "hook":
 		// Pure runtime entries (`jog hook <client>`, JSON on stdin) are the
 		// exact commands `jog agents install` wires into settings, so they
@@ -297,8 +295,6 @@ func run(args []string) int {
 	case "hooks", "skill", "skills":
 		fmt.Fprintf(os.Stderr, "jog: %q moved — `jog agents install|uninstall|list` manages hooks and skills\n", args[0])
 		return 2
-	case "pick":
-		return cli.Pick(args[1:])
 	case "trim":
 		return cli.Trim(args[1:])
 	case "config":

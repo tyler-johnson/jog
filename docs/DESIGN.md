@@ -50,7 +50,7 @@ One Go binary. Two write paths in, several read paths out:
   agent hooks ─────┐
   git alias (you) ─┼──►  jog snap engine ──► refs/jog/<branch> in .git
   manual `jog` ────┘                            │
-                                                ├─► jog snaps / since / back / pick
+                                                ├─► jog log / since / restore
                                                 └─► jog mcp  (agent read access)
 ```
 
@@ -159,7 +159,7 @@ Verified properties and gotchas the implementation must preserve:
 | Exec bit and symlinks preserved (100755 / 120000) | nothing to do |
 | Dangling commits (ref update skipped) are pruned by gc | update the ref immediately after commit-tree, always |
 | Normal `push`/`clone` transfer nothing under custom ref namespaces; leaks only via `push --mirror`, `clone --mirror`, explicit `refs/*:refs/*`, `bundle --all` | private by default; document the leak vectors |
-| New-file size: guard large blobs | `jog.maxFileSize` (default 50 MiB), skip + warn, list skipped in `jog snaps` |
+| New-file size: guard large blobs | `jog.maxFileSize` (default 50 MiB), skip + warn, list skipped in `jog log` |
 | Loose objects accumulate (plumbing never triggers `gc --auto`) | `jog trim` runs `git gc --auto` afterward |
 
 Performance budget: **no-op ≤ 30 ms; typical snapshot ≤ 100 ms** (reference:
@@ -175,11 +175,10 @@ First argument is matched against a short reserved list chosen to collide with
 
 ```
 jog                       # snapshot now        (also: jog -m "msg")
-jog snaps [path]          # timeline: age, provenance, files changed; -p for diffs
+jog log [path]            # timeline browser: age, provenance, diffs (aliases: snaps, pick)
 jog since [3h] [path]     # what changed vs the snapshot N ago
-jog back <path> [--at T]  # restore one file      (T: git reflog time syntax or snap id)
-jog back --all --at T     # restore whole tree, including deletions
-jog pick <path> [--all]   # fzf/TUI scrub through versions (--all: across every chain)
+jog restore <path> [--at T]  # restore files      (T: git reflog time syntax or snap id)
+jog restore --all --at T  # restore whole tree, including deletions (alias: back)
 jog trim                  # apply retention policy + gc
 jog hook claude|codex     # agent hook entry points (read hook JSON on stdin)
 jog mcp                   # MCP server over the read paths
@@ -244,7 +243,7 @@ binary no-ops in ms outside git repos:
 session_id) into provenance. Rules: always exit 0; never block; per-tool-call
 frequency is fine (no-op path is ~25 ms; only tree-changing calls mint
 objects). `UserPromptSubmit` aligns jog snapshots with Claude's own checkpoint
-boundaries — `/rewind` the conversation, `jog back --all` the world.
+boundaries — `/rewind` the conversation, `jog restore --all` the world.
 
 Codex uses the same event boundaries through `~/.codex/hooks.json`, with
 `Bash|Edit|Write` matching shell commands and the `apply_patch` aliases, and
@@ -299,7 +298,7 @@ not just insurance. Official Go MCP SDK.
 Invariants (each is a `jog doctor` check backed by a lab result):
 
 1. User index byte-identical across any jog operation.
-2. Worktree written only by explicit `jog back`.
+2. Worktree written only by explicit `jog restore`.
 3. HEAD, branches, tags, remotes: never written.
 4. Repo config written only at init (`gc.refs/jog/*` keys) with consent.
 5. All read commands run `--no-optional-locks`.

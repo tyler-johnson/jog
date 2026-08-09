@@ -28,7 +28,7 @@ import (
 )
 
 const (
-	// Fixed snapshot identity (plan D1). Load-bearing: `jog snaps` stops its
+	// Fixed snapshot identity (plan D1). Load-bearing: `jog log` stops its
 	// first-parent walk at the first commit not committed by this identity —
 	// the oldest snapshot's parent 1 is a real HEAD commit, so without the
 	// marker the walk would run off the chain into real history.

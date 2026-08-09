@@ -42,9 +42,10 @@ func normalizeTime(at string) string {
 	return m[1] + "." + shorthandUnits[m[2]] + ".ago"
 }
 
-// Back is `jog back <path>… [--at T]` / `jog back --all [--at T]`: restore
-// from a snapshot, worktree-only — the single command that writes the
-// user's files, and it never touches the index (matrix row 15).
+// Restore is `jog restore <path>… [--at T]` / `jog restore --all [--at T]`:
+// restore from a snapshot, worktree-only — the single command that writes
+// the user's files, and it never touches the index (matrix row 15). `back`
+// is an alias (verb records what was typed).
 //
 // Ordering is load-bearing:
 //  1. resolve the target — BEFORE the pre-restore snapshot, so the default
@@ -52,7 +53,7 @@ func normalizeTime(at string) string {
 //  2. snapshot (mandatory, not best-effort) — the undo point, and for --all
 //     the diff base that makes deletions computable;
 //  3. write the worktree.
-func Back(args []string) int {
+func Restore(verb string, args []string) int {
 	all := false
 	at := ""
 	var paths []string
@@ -74,7 +75,7 @@ func Back(args []string) int {
 		}
 	}
 	if all == (len(paths) > 0) {
-		fmt.Fprintln(os.Stderr, `jog: usage: jog back <path>… [--at T]  |  jog back --all [--at T]`)
+		fmt.Fprintln(os.Stderr, `jog: usage: jog restore <path>… [--at T]  |  jog restore --all [--at T]`)
 		return 2
 	}
 
@@ -99,7 +100,7 @@ func Back(args []string) int {
 	// The pre-restore snapshot makes the restore itself undoable (jj-style)
 	// and is required, not best-effort: without it, --all can't compute
 	// deletions and a bad restore would be unrecoverable.
-	res, err := snap.Take(repo, provenance.Pre(strings.TrimSpace("jog back "+strings.Join(args, " "))))
+	res, err := snap.Take(repo, provenance.Pre(strings.TrimSpace("jog "+verb+" "+strings.Join(args, " "))))
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "jog: pre-restore snapshot failed, aborting: %v\n", err)
 		return 1
@@ -117,9 +118,9 @@ func Back(args []string) int {
 	}
 
 	if all {
-		return backAll(repo, target, fresh)
+		return restoreAll(repo, target, fresh)
 	}
-	return backPaths(repo, target, paths)
+	return restorePaths(repo, target, paths)
 }
 
 // resolveTarget turns --at into a snapshot commit: try a commit-ish (snap
@@ -157,31 +158,31 @@ func resolveTarget(repo *gitx.Repo, ref, at string) (string, error) {
 		return "", err
 	}
 	if committer != snap.IdentityEmail {
-		return "", fmt.Errorf("%s is not a jog snapshot — jog back only restores from the snapshot timeline", at)
+		return "", fmt.Errorf("%s is not a jog snapshot — jog restore only restores from the snapshot timeline", at)
 	}
 	return sha, nil
 }
 
-// backPaths restores the given paths (cwd-relative, git pathspec semantics)
-// from the target. `git restore --source … --worktree` only — checkout
-// would silently stage into the real index (verified trap).
-func backPaths(repo *gitx.Repo, target string, paths []string) int {
+// restorePaths restores the given paths (cwd-relative, git pathspec
+// semantics) from the target. `git restore --source … --worktree` only —
+// checkout would silently stage into the real index (verified trap).
+func restorePaths(repo *gitx.Repo, target string, paths []string) int {
 	restoreArgs := append([]string{"restore", "--source=" + target, "--worktree", "--"}, paths...)
 	if _, err := repo.Run(restoreArgs...); err != nil {
 		fmt.Fprintf(os.Stderr, "jog: %v\n", err)
 		return 1
 	}
 	fmt.Printf("restored %s from %s\n", strings.Join(paths, " "), styleSnapID(describe(repo, target)))
-	fmt.Println(styleDim.Render("(undo: jog back " + strings.Join(paths, " ") + ")"))
+	fmt.Println(styleDim.Render("(undo: jog restore " + strings.Join(paths, " ") + ")"))
 	return 0
 }
 
-// backAll makes the worktree exactly the target tree: diff target→fresh
+// restoreAll makes the worktree exactly the target tree: diff target→fresh
 // (the just-taken snapshot), restore modified/deleted paths, delete paths
 // added since the target. Both trees respect ignore rules, so ignored files
 // are structurally untouchable. Runs from the toplevel — diff paths are
 // root-relative.
-func backAll(repo *gitx.Repo, target, fresh string) int {
+func restoreAll(repo *gitx.Repo, target, fresh string) int {
 	top, err := repo.RunRead("rev-parse", "--show-toplevel")
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "jog: %v\n", err)
@@ -222,7 +223,7 @@ func backAll(repo *gitx.Repo, target, fresh string) int {
 		}
 	}
 	fmt.Printf("restored to %s: %d restored, %d deleted\n", styleSnapID(describe(repo, target)), len(toRestore), len(toDelete))
-	fmt.Println(styleDim.Render("(undo: jog back --all)"))
+	fmt.Println(styleDim.Render("(undo: jog restore --all)"))
 	return 0
 }
 

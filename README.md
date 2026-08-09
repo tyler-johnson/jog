@@ -14,19 +14,19 @@ stored as ordinary git objects. No daemon, no new VCS, no workflow change.*
 ```console
 $ rm -rf src/parser        # oops. uncommitted changes and untracked files, gone.
 
-$ jog snaps                # ...but every command boundary was snapshotted
+$ jog log                  # ...but every command boundary was snapshotted
 c0ffee1  2 minutes ago   pre: git status
 a1b2c3d  9 minutes ago   claude[b3f1a2c4]: Bash(go test ./...)
 9e8d7c6  14 minutes ago  manual: before parser rewrite
 
-$ jog back --all           # worktree back to the newest snapshot
+$ jog restore --all        # worktree back to the newest snapshot
 restored to c0ffee1 (2 minutes ago — pre: git status): 14 restored, 0 deleted
-(undo: jog back --all)
+(undo: jog restore --all)
 ```
 
-On a terminal, `jog snaps` opens the timeline as an interactive browser —
-scrub with a live patch preview, enter restores the tree (after a y/n
-confirm). Piped, it prints the plain list shown above.
+On a terminal, `jog log` opens the timeline as an interactive browser —
+scrub with a live diff preview, press `r` to restore the tree (after a
+y/n confirm). Piped, it prints the plain list shown above.
 
 ## Why jog
 
@@ -39,7 +39,7 @@ Pick the pitch that fits how you work:
   restore Edit/Write changes but explicitly not bash-made changes, manual
   edits, or untracked files — and they expire. jog covers exactly that
   complement, at the same prompt/tool-call boundaries, with retention you
-  control: `/rewind` the conversation, `jog back --all` the world.
+  control: `/rewind` the conversation, `jog restore --all` the world.
 - **[jj]'s snapshot model wearing git's skin.** Snapshot at the start of
   every command — but the commands are the git you already type.
 
@@ -154,7 +154,7 @@ restore — on the clients whose hook protocol can inject context (Claude
 Code, Codex, Gemini, OpenCode). Each client's installed skill goes further
 and teaches the full recovery workflow.
 
-**4. Verify:** make any change in a repo, run `git status`, then `jog snaps`
+**4. Verify:** make any change in a repo, run `git status`, then `jog log`
 — you should see a `pre: git status` entry.
 
 ## Usage
@@ -165,19 +165,18 @@ Two disjoint namespaces, one rule: **`jog git` is the only door to git.**
 |---|---|
 | `jog` | snapshot now, show the top of the timeline |
 | `jog -m "msg"` | snapshot with a message (`manual: msg`) |
-| `jog snaps [-p] [-n N] [--all] [--json] [--format=F] [path…]` | browse the timeline — scrub with a patch preview, enter restores after a y/n confirm; piped it prints plainly: id, age, provenance, files changed (`-p`: patches, `-n`: newest N, `--all`: every branch interleaved, `--json`: machine-readable, `--format`: git log format) |
+| `jog log [-p] [-n N] [--all] [--json] [--format=F] [path…]` | browse the timeline — scrub with a diff preview, `r` restores after a y/n confirm; piped it prints plainly: id, age, provenance, files changed (`-p`: patches, `-n`: newest N, `--all`: every branch interleaved, `--json`: machine-readable, `--format`: git log format). With paths, browsing and restoring are scoped to those paths |
 | `jog since [T] [path…]` | what changed since a snapshot (default: your last command boundary; `-p`: patches) |
-| `jog back <path>… [--at T]` | restore files from a snapshot (worktree only) |
-| `jog back --all [--at T]` | restore the whole tree, including deleting files created since |
+| `jog restore <path>… [--at T]` | restore files from a snapshot (worktree only) |
+| `jog restore --all [--at T]` | restore the whole tree, including deleting files created since |
 | `jog git <args>` | snapshot, then run the real git command — what the alias expands to |
-| `jog pick [--all] <path>` | scrub through a file's versions — list, preview, enter to restore (`q` leaves everything untouched) |
 | `jog trim [--dry-run]` | apply the retention taper; the previous tip stays at `refs/jog/@trash/<branch>` until the next trim |
 | `jog config [key [value]]` | list jog's settings with values and meanings — or get and set them |
 | `jog doctor [--fix]` | verify invariants, wiring, and liveness (`--fix` repairs the gc config) |
 | `jog agents install` | hooks + skill for every agent client on this machine (`uninstall`, `list`; `[hooks\|skill]` and client names narrow it; `--project`: this repo) |
 | `jog version` | print jog's version |
 
-`--at` (and `since`'s target slot) accepts a snap id from `jog snaps` or a
+`--at` (and `since`'s target slot) accepts a snap id from `jog log` or a
 time: `--at 30m`, `--at 1h`, `--at 2d`, `--at 1w` — plus anything git's
 date syntax accepts (`--at yesterday`, `--at 2.hours.ago`). Asking for a
 time older than the oldest snapshot falls back to the oldest, with a
@@ -188,6 +187,9 @@ ahead of**, never who made the changes. Manual edits swept up by an
 agent-triggered snapshot are attributed to that trigger — jog can't know who
 typed between boundaries, and refuses to guess.
 
+`snaps` and `pick` are aliases of `jog log`, and `back` of `jog restore`
+— older muscle memory keeps working.
+
 `mcp` is reserved for a future release.
 Anything else is an error — jog never guesses.
 
@@ -196,10 +198,10 @@ Anything else is an error — jog never guesses.
 **An agent deleted a file three prompts ago.** Find it, get it back:
 
 ```console
-$ jog snaps src/config.yaml
+$ jog log src/config.yaml
 f3a9b12  8 minutes ago  claude[b3f1a2c4]: Bash(rm -rf src/old)
 D       src/config.yaml
-$ jog back src/config.yaml --at 9m
+$ jog restore src/config.yaml --at 9m
 restored src/config.yaml from 2c4d6e8 (9 minutes ago — claude[b3f1a2c4]: prompt "clean up the src tree")
 ```
 
@@ -207,9 +209,9 @@ restored src/config.yaml from 2c4d6e8 (9 minutes ago — claude[b3f1a2c4]: promp
 deleting the files it scattered:
 
 ```console
-$ jog back --all --at 25m
+$ jog restore --all --at 25m
 restored to 9e8d7c6 (26 minutes ago — manual: before parser rewrite): 11 restored, 3 deleted
-(undo: jog back --all)
+(undo: jog restore --all)
 ```
 
 Every restore snapshots first, so undo is itself undoable.
@@ -218,23 +220,23 @@ Every restore snapshots first, so undo is itself undoable.
 
 ```console
 $ jog since 1h           # per-file summary since the snapshot nearest 1h ago
-$ jog snaps -p           # full patches, in your pager
-$ jog snaps src/parser/  # just one path's history
+$ jog log -p           # full patches, in your pager
+$ jog log src/parser/  # just one path's history
 ```
 
 **Find the version of one file where it still worked**, scrubbing visually:
 
 ```console
-$ jog pick src/parser/lexer.go
+$ jog log src/parser/lexer.go
 ```
 
 **Script the timeline** — agents and scripts get structure without knowing
 how snapshots map onto git refs:
 
 ```console
-$ jog snaps --json -n 5           # newest five: sha, ISO time, provenance, chain, files
-$ jog snaps --json src/ | jq -r '.[].provenance'
-$ jog snaps --format='%h %cI %s'  # any git log format, one entry per line
+$ jog log --json -n 5           # newest five: sha, ISO time, provenance, chain, files
+$ jog log --json src/ | jq -r '.[].provenance'
+$ jog log --format='%h %cI %s'  # any git log format, one entry per line
 ```
 
 **The timeline is getting long.** Apply the retention taper — everything
@@ -252,7 +254,7 @@ own, and its last pre-trim state survives until the trim after next.
 
 1. Your **index** — byte-identical across any jog operation (jog stages into
    a private shadow index; all reads use `--no-optional-locks`).
-2. Your **worktree** — written only by an explicit `jog back`, which is
+2. Your **worktree** — written only by an explicit `jog restore`, which is
    itself snapshotted first.
 3. **HEAD, branches, tags, remotes** — never written.
 4. **Repo config** — two `gc.refs/jog/*` keys are set once, on first

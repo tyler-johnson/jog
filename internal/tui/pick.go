@@ -16,14 +16,20 @@ type PickItem struct {
 	Label string
 }
 
-// RunPick shows a scrollable list with a preview pane and returns the
-// chosen item's ID, or aborted=true when the user backs out (q/esc) —
+// RunPick shows a two-frame browser — a list over a preview — and returns
+// the chosen item's ID, or aborted=true when the user backs out (q) —
 // aborting must always be the safe, obvious exit.
 //
-// confirm, when non-empty, makes enter ask before choosing: it is a
-// fmt template whose single %s receives the highlighted item's short id
+// One frame is focused at a time: ↑/↓ (or j/k) move the list or scroll the
+// preview depending on focus, enter focuses the preview, esc returns to
+// the list (and quits from it). r chooses and q quits from either frame —
+// no pgup/pgdn or fn-layer keys required (they still scroll the preview
+// for keyboards that have them).
+//
+// confirm, when non-empty, makes r ask before choosing: it is a fmt
+// template whose single %s receives the highlighted item's short id
 // (e.g. "restore the whole tree to %s? y/n"); y chooses, anything else
-// returns to browsing. Empty means enter chooses instantly.
+// returns to browsing. Empty means r chooses instantly.
 func RunPick(title string, items []PickItem, preview func(id string) string, confirm string) (id string, aborted bool, err error) {
 	m := pickModel{title: title, items: items, preview: preview, confirm: confirm, cache: map[int]string{}}
 	out, err := tea.NewProgram(&m, tea.WithAltScreen()).Run()
@@ -47,6 +53,7 @@ type pickModel struct {
 	cursor        int
 	chosen        int
 	offset        int // preview scroll, in lines
+	focusDiff     bool
 	confirming    bool
 	width, height int
 }
@@ -76,31 +83,39 @@ func (m *pickModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		switch msg.String() {
 		case "up", "k":
-			if m.cursor > 0 {
+			if m.focusDiff {
+				m.scroll(-1)
+			} else if m.cursor > 0 {
 				m.cursor--
 				m.offset = 0
 			}
 		case "down", "j":
-			if m.cursor < len(m.items)-1 {
+			if m.focusDiff {
+				m.scroll(1)
+			} else if m.cursor < len(m.items)-1 {
 				m.cursor++
 				m.offset = 0
 			}
-		case "pgdown":
+		case "pgdown", "ctrl+d":
 			m.scroll(m.previewH() - 1)
-		case "pgup":
+		case "pgup", "ctrl+u":
 			m.scroll(-(m.previewH() - 1))
-		case "ctrl+d":
-			m.scroll(m.previewH() / 2)
-		case "ctrl+u":
-			m.scroll(-(m.previewH() / 2))
 		case "enter":
+			m.focusDiff = true
+		case "esc":
+			if m.focusDiff {
+				m.focusDiff = false
+			} else {
+				return m, tea.Quit
+			}
+		case "r":
 			if m.confirm != "" {
 				m.confirming = true
 				return m, nil
 			}
 			m.chosen = m.cursor
 			return m, tea.Quit
-		case "q", "esc", "ctrl+c":
+		case "q", "ctrl+c":
 			return m, tea.Quit
 		}
 	}
@@ -118,12 +133,17 @@ func (m *pickModel) View() string {
 	var b strings.Builder
 	b.WriteString(m.title + "\n")
 
-	// List window scrolled around the cursor.
+	// List window scrolled around the cursor. The cursor row dims when
+	// focus is on the diff, so the focused frame is always evident.
 	start := max(0, min(m.cursor-listH/2, len(m.items)-listH))
 	for i := start; i < start+listH && i < len(m.items); i++ {
 		line := "  " + m.items[i].Label
 		if i == m.cursor {
-			line = "\x1b[7m> " + m.items[i].Label + "\x1b[0m"
+			style := "\x1b[7m"
+			if m.focusDiff {
+				style = "\x1b[2;7m"
+			}
+			line = style + "> " + m.items[i].Label + "\x1b[0m"
 		}
 		b.WriteString(line + "\n")
 	}
@@ -133,9 +153,14 @@ func (m *pickModel) View() string {
 		writeClipped(&b, m.previewLines(), m.offset, previewH)
 	}
 
-	footer := fmt.Sprintf("%d/%d  ↑↓ move · pgdn/pgup scroll · enter restore · q quit", m.cursor+1, len(m.items))
-	if m.confirming {
+	var footer string
+	switch {
+	case m.confirming:
 		footer = "\x1b[7m" + fmt.Sprintf(m.confirm, shortID(m.items[m.cursor].ID)) + "\x1b[0m"
+	case m.focusDiff:
+		footer = fmt.Sprintf("%d/%d  ↑↓ scroll · esc back to list · r restore · q quit", m.cursor+1, len(m.items))
+	default:
+		footer = fmt.Sprintf("%d/%d  ↑↓ move · enter read diff · r restore · q quit", m.cursor+1, len(m.items))
 	}
 	b.WriteString("\n" + footer)
 	return b.String()

@@ -15,25 +15,27 @@ import (
 	"golang.org/x/term"
 )
 
-// snapsFormat renders one timeline entry: short id, age, provenance, then
+// logFormat renders one timeline entry: short id, age, provenance, then
 // the body only when present (%+b) — it holds the maxFileSize skipped-list;
 // --name-status or -p supplies the files-changed detail. The leading %n
 // separates entries with a blank line, since the detail block runs flush
 // against the next header otherwise.
-const snapsFormat = "--format=%n%C(auto,yellow)%h%C(auto,reset)  %C(auto,green)%cr%C(auto,reset)  %s%+b"
+const logFormat = "--format=%n%C(auto,yellow)%h%C(auto,reset)  %C(auto,green)%cr%C(auto,reset)  %s%+b"
 
-// snapsAllFormat adds the chain each entry belongs to (%S — the ref as
+// logAllFormat adds the chain each entry belongs to (%S — the ref as
 // spelled on the command line).
-const snapsAllFormat = "--format=%n%C(auto,yellow)%h%C(auto,reset)  %C(auto,cyan)%S%C(auto,reset)  %C(auto,green)%cr%C(auto,reset)  %s%+b"
+const logAllFormat = "--format=%n%C(auto,yellow)%h%C(auto,reset)  %C(auto,cyan)%S%C(auto,reset)  %C(auto,green)%cr%C(auto,reset)  %s%+b"
 
-// Snaps is `jog snaps [-p] [-n N] [--all] [--json] [--format=F] [path…]`:
+// Log is `jog log [-p] [-n N] [--all] [--json] [--format=F] [path…]`:
 // the timeline of the current branch's chain (D5) — or with --all the whole
 // forest, every chain interleaved by time (plan D13). Interactive on a TTY;
 // otherwise rendered by real `git log` over the exact snapshot ranges,
 // exec'd so git's pager and coloring apply — or as JSON / a caller-supplied
 // format, so scripts and agents never need to know how snapshots map onto
-// git refs and ranges.
-func Snaps(args []string) int {
+// git refs and ranges. With paths, a restore from the browser touches only
+// those paths — `snaps` and `pick` are aliases (verb records what was
+// typed).
+func Log(verb string, args []string) int {
 	patch := false
 	all := false
 	jsonOut := false
@@ -51,7 +53,7 @@ func Snaps(args []string) int {
 			jsonOut = true
 		case a == "-n":
 			if i+1 >= len(args) {
-				fmt.Fprintln(os.Stderr, "jog: -n wants a count (jog snaps -n 5)")
+				fmt.Fprintln(os.Stderr, "jog: -n wants a count (jog log -n 5)")
 				return 2
 			}
 			i++
@@ -62,7 +64,7 @@ func Snaps(args []string) int {
 			userFormat = strings.TrimPrefix(a, "--format=")
 		case a == "--format":
 			if i+1 >= len(args) {
-				fmt.Fprintf(os.Stderr, "jog: --format wants a git log format (jog snaps --format='%%h %%s')\n")
+				fmt.Fprintf(os.Stderr, "jog: --format wants a git log format (jog log --format='%%h %%s')\n")
 				return 2
 			}
 			i++
@@ -100,9 +102,9 @@ func Snaps(args []string) int {
 	// Snapshot first, jj-style: browsing the timeline is a command boundary
 	// too, so the tree you're looking from is itself on the timeline.
 	// Best-effort; a failure must not block the read.
-	snap.Take(repo, provenance.Pre(strings.TrimSpace("jog snaps "+strings.Join(args, " "))))
+	snap.Take(repo, provenance.Pre(strings.TrimSpace("jog "+verb+" "+strings.Join(args, " "))))
 
-	format := snapsFormat
+	format := logFormat
 	var ranges []string
 	if all {
 		var err error
@@ -120,7 +122,7 @@ func Snaps(args []string) int {
 		}
 		// %S attributes each entry to the chain it came from, spelled as
 		// passed — forestRanges passes `jog/<branch>` so the label is short.
-		format = snapsAllFormat
+		format = logAllFormat
 	} else {
 		ref, rng, exists, err := chainRange(repo)
 		if err != nil {
@@ -144,7 +146,7 @@ func Snaps(args []string) int {
 	// Machine output first: JSON is JSON on a TTY too, so scripts and
 	// agents get the same bytes everywhere.
 	if jsonOut {
-		return snapsJSON(repo, ranges, paths, limit)
+		return logJSON(repo, ranges, paths, limit)
 	}
 
 	// On a terminal, browse instead of print: the same scrub-and-preview
@@ -152,7 +154,7 @@ func Snaps(args []string) int {
 	// even on a TTY, --format means the caller wants specific bytes, and
 	// piped output is always the git passthrough.
 	if !patch && userFormat == "" && term.IsTerminal(int(os.Stdout.Fd())) {
-		return snapsTUI(repo, all, ranges, paths, limit)
+		return logTUI(repo, all, ranges, paths, limit)
 	}
 
 	gitArgs := []string{"log", "--first-parent"}
@@ -182,10 +184,10 @@ func Snaps(args []string) int {
 	return execGit(gitArgs)
 }
 
-// snapEntry is one timeline entry in `jog snaps --json` — everything an
+// snapEntry is one timeline entry in `jog log --json` — everything an
 // agent or script needs without knowing how snapshots map onto git refs:
-// ids for jog back/since, an ISO timestamp, provenance, the chain, and the
-// files each snapshot changed.
+// ids for jog restore/since, an ISO timestamp, provenance, the chain, and
+// the files each snapshot changed.
 type snapEntry struct {
 	ID         string     `json:"id"`
 	SHA        string     `json:"sha"`
@@ -205,11 +207,11 @@ type snapFile struct {
 	From   string `json:"from,omitempty"`
 }
 
-// snapsJSON prints the timeline as a JSON array. One git call: each entry's
+// logJSON prints the timeline as a JSON array. One git call: each entry's
 // fields are fenced by \x1e records and \x1f fields (the body can hold
 // newlines, so line-based parsing would be ambiguous); the --name-status
 // block for a record lands between its terminator and the next record.
-func snapsJSON(repo *gitx.Repo, ranges, paths []string, limit string) int {
+func logJSON(repo *gitx.Repo, ranges, paths []string, limit string) int {
 	gitArgs := []string{"log", "--first-parent",
 		"--format=%x1e%H%x1f%cI%x1f%cr%x1f%S%x1f%s%x1f%b%x1e", "--name-status"}
 	if limit != "" {
@@ -269,51 +271,26 @@ func chainName(s string) string {
 	return strings.TrimPrefix(s, "jog/")
 }
 
-// snapsTUI is the interactive timeline: the pick scaffolding over whole-tree
-// snapshots. Enter asks y/n before restoring — a whole-tree restore feels
-// bigger than pick's single file — and a confirmed restore goes through the
-// back machinery, so it is snapshotted first and undoable like any other.
-func snapsTUI(repo *gitx.Repo, all bool, ranges, paths []string, limit string) int {
-	format := "--format=%H\x1f%cr\x1f%s"
-	if all {
-		format = "--format=%H\x1f%S\x1f%cr\x1f%s"
-	}
-	gitArgs := append([]string{"log", "--first-parent", format}, ranges...)
-	if limit != "" {
-		gitArgs = append(gitArgs, "-n", limit)
-	}
-	if len(paths) > 0 {
-		gitArgs = append(gitArgs, "--")
-		gitArgs = append(gitArgs, paths...)
-	}
-	out, err := repo.RunRead(gitArgs...)
+// logTUI is the interactive timeline: the two-frame browser over whole-tree
+// snapshots. r asks y/n before restoring, and a confirmed restore goes
+// through the restore machinery, so it is snapshotted first and undoable
+// like any other.
+func logTUI(repo *gitx.Repo, all bool, ranges, paths []string, limit string) int {
+	items, err := timelineItems(repo, all, ranges, paths, limit)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "jog: %v\n", err)
 		return 1
 	}
-	if out == "" {
+	if len(items) == 0 {
 		// The chain exists (empty chains were handled above); a path
 		// filter left nothing.
 		fmt.Printf("no snapshots touch %s\n", strings.Join(paths, " "))
 		return 0
 	}
 
-	var items []tui.PickItem
-	for _, line := range strings.Split(out, "\n") {
-		f := strings.SplitN(line, "\x1f", 4)
-		switch {
-		case all && len(f) == 4:
-			items = append(items, tui.PickItem{ID: f[0],
-				Label: fmt.Sprintf("%s  %s  %s  %s", f[0][:7], f[1], f[2], f[3])})
-		case !all && len(f) == 3:
-			items = append(items, tui.PickItem{ID: f[0],
-				Label: fmt.Sprintf("%s  %s  %s", f[0][:7], f[1], f[2])})
-		}
-	}
-
-	title := "snapshots on every chain — enter restores (with confirmation), q leaves everything untouched"
+	title := "snapshots on every chain — r restores, q leaves everything untouched"
 	if !all {
-		title = fmt.Sprintf("snapshots on %s — enter restores (with confirmation), q leaves everything untouched",
+		title = fmt.Sprintf("snapshots on %s — r restores, q leaves everything untouched",
 			strings.TrimPrefix(chainRef(repo), "refs/jog/"))
 	}
 	confirm := "restore the whole tree to %s? y/n"
@@ -333,9 +310,44 @@ func snapsTUI(repo *gitx.Repo, all bool, ranges, paths []string, limit string) i
 		return 0
 	}
 	if len(paths) > 0 {
-		return Back(append(append([]string{}, paths...), "--at", chosen))
+		return Restore("restore", append(append([]string{}, paths...), "--at", chosen))
 	}
-	return Back([]string{"--all", "--at", chosen})
+	return Restore("restore", []string{"--all", "--at", chosen})
+}
+
+// timelineItems lists the browser's rows — id, age, provenance, plus the
+// chain column with all — over the exact snapshot ranges.
+func timelineItems(repo *gitx.Repo, all bool, ranges, paths []string, limit string) ([]tui.PickItem, error) {
+	format := "--format=%H\x1f%cr\x1f%s"
+	if all {
+		format = "--format=%H\x1f%S\x1f%cr\x1f%s"
+	}
+	gitArgs := append([]string{"log", "--first-parent", format}, ranges...)
+	if limit != "" {
+		gitArgs = append(gitArgs, "-n", limit)
+	}
+	if len(paths) > 0 {
+		gitArgs = append(gitArgs, "--")
+		gitArgs = append(gitArgs, paths...)
+	}
+	out, err := repo.RunRead(gitArgs...)
+	if err != nil || out == "" {
+		return nil, err
+	}
+
+	var items []tui.PickItem
+	for _, line := range strings.Split(out, "\n") {
+		f := strings.SplitN(line, "\x1f", 4)
+		switch {
+		case all && len(f) == 4:
+			items = append(items, tui.PickItem{ID: f[0],
+				Label: fmt.Sprintf("%s  %s  %s  %s", f[0][:7], f[1], f[2], f[3])})
+		case !all && len(f) == 3:
+			items = append(items, tui.PickItem{ID: f[0],
+				Label: fmt.Sprintf("%s  %s  %s", f[0][:7], f[1], f[2])})
+		}
+	}
+	return items, nil
 }
 
 // snapPreview renders what a snapshot changed: stat header, then the patch.
