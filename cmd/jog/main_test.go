@@ -1126,3 +1126,39 @@ func TestPerCommandHelp(t *testing.T) {
 		t.Errorf("help for unknown verb: code=%d stderr=%q", code, stderr)
 	}
 }
+
+// The compact time shorthand (30m, 1h, 2d, 1w) is jog's primary documented
+// syntax, and git itself cannot parse it: "@{1h}" reads as an ancient date
+// and falls back to the oldest reflog entry — the "since 1h shows
+// everything" bug. jog translates the shorthand before resolution; this
+// pins that `since 1h` means the chain state an hour ago, and that
+// `back --at` shares the fix.
+func TestShortTimeTargets(t *testing.T) {
+	tr := testrepo.New(t)
+	tr.Write("a.txt", "x\n")
+	tr.Commit("base")
+	head := tr.Git("rev-parse", "HEAD")
+	ref := "refs/jog/main"
+	now := time.Now()
+	old := mintSnap(t, tr, ref, "three hours old\n", now.Add(-3*time.Hour), head)
+	recent := mintSnap(t, tr, ref, "ninety minutes old\n", now.Add(-90*time.Minute), head)
+
+	tr.Write("w.txt", "current\n")
+	stdout, stderr, code := runJog(t, tr.Dir, "since", "1h")
+	if code != 0 {
+		t.Fatalf("since 1h: code=%d stderr=%s", code, stderr)
+	}
+	if !strings.Contains(stdout, recent[:7]) {
+		t.Errorf("since 1h: want target %s (the state an hour ago), got:\n%s", recent[:7], stdout)
+	}
+	if strings.Contains(stdout, old[:7]) {
+		t.Errorf("since 1h fell back to the oldest snapshot:\n%s", stdout)
+	}
+
+	if _, stderr, code := runJog(t, tr.Dir, "back", "w.txt", "--at", "2h"); code != 0 {
+		t.Fatalf("back --at 2h: code=%d stderr=%s", code, stderr)
+	}
+	if b, _ := os.ReadFile(filepath.Join(tr.Dir, "w.txt")); string(b) != "three hours old\n" {
+		t.Errorf("back --at 2h restored %q, want the three-hour-old version", b)
+	}
+}

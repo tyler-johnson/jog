@@ -76,8 +76,8 @@ usage:
 Diffs a snapshot against the working tree as it is right now (a fresh
 snapshot is taken first, so untracked files count). Without T the
 baseline is your last command boundary — "what did that change". T is a
-snap id from jog snaps, or git time syntax: 1h, 20.minutes.ago,
-yesterday.
+snap id from jog snaps, or a time: 30m, 1h, 2d, 1w — or anything git's
+date syntax accepts (yesterday, 2.hours.ago).
 
 options:
   -p, --patch   full patches instead of the per-file summary
@@ -94,9 +94,9 @@ usage:
   jog back --all [--at T]
 
 Restores files as they were in a snapshot — by default the newest one;
---at takes a snap id from jog snaps or git time syntax
-(--at 20.minutes.ago). --all restores the whole tree, including deleting
-files created since the snapshot.
+--at takes a snap id from jog snaps or a time: --at 30m, --at 1h,
+--at 2d (or any git date, like yesterday). --all restores the whole
+tree, including deleting files created since the snapshot.
 
 Only the worktree is written: index, HEAD, branches, and staged changes
 stay exactly as they are. Every restore snapshots first, so any jog back

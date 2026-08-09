@@ -4,12 +4,43 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/tyler-johnson/jog/internal/gitx"
 	"github.com/tyler-johnson/jog/internal/provenance"
 	"github.com/tyler-johnson/jog/internal/snap"
 )
+
+// Compact time shorthand: 30m, 1h, 2d — the spellings jog documents first.
+var shorthandTime = regexp.MustCompile(`^(\d+)([smhdw])$`)
+
+var shorthandUnits = map[string]string{
+	"s": "seconds", "m": "minutes", "h": "hours", "d": "days", "w": "weeks",
+}
+
+// normalizeTime translates the shorthand into the dotted syntax git's
+// reflog date parser understands (1h → 1.hours.ago). Git itself cannot
+// parse "1h": it reads it as an ancient date and silently falls back to
+// the oldest reflog entry — "diff against the beginning of time"
+// (verified against git 2.50). The shorthand deliberately wins over
+// commit-ish interpretation: a digits-plus-d string (123d) could in
+// principle abbreviate an object id, but snap ids are shown at 7 chars
+// and a full id always works. Bare @{…} targets get the same treatment
+// inside the braces.
+func normalizeTime(at string) string {
+	if inner, ok := strings.CutPrefix(at, "@{"); ok {
+		if inner, ok = strings.CutSuffix(inner, "}"); ok {
+			return "@{" + normalizeTime(inner) + "}"
+		}
+		return at
+	}
+	m := shorthandTime.FindStringSubmatch(at)
+	if m == nil {
+		return at
+	}
+	return m[1] + "." + shorthandUnits[m[2]] + ".ago"
+}
 
 // Back is `jog back <path>… [--at T]` / `jog back --all [--at T]`: restore
 // from a snapshot, worktree-only — the single command that writes the
@@ -97,6 +128,7 @@ func Back(args []string) int {
 // stderr, exit 0 (verified). Whatever resolves must be a jog snapshot: the
 // fixed identity (D1) is the guard against restoring an arbitrary tree.
 func resolveTarget(repo *gitx.Repo, ref, at string) (string, error) {
+	at = normalizeTime(at)
 	var sha string
 	var err error
 	switch {

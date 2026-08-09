@@ -156,9 +156,10 @@ Two disjoint namespaces, one rule: **`jog git` is the only door to git.**
 | `jog skill claude install` | install the Claude Code skill that teaches agents the recovery workflow (`uninstall`, `--print`; `--project`: this repo) |
 | `jog version` | print jog's version |
 
-`--at` (and `since`'s target slot) accepts a snap id from `jog snaps` or
-git's reflog time syntax: `--at 20.minutes.ago`, `--at yesterday`. Asking
-for a time older than the oldest snapshot falls back to the oldest, with a
+`--at` (and `since`'s target slot) accepts a snap id from `jog snaps` or a
+time: `--at 30m`, `--at 1h`, `--at 2d`, `--at 1w` — plus anything git's
+date syntax accepts (`--at yesterday`, `--at 2.hours.ago`). Asking for a
+time older than the oldest snapshot falls back to the oldest, with a
 warning.
 
 A reading rule for the timeline: provenance records **what jog was running
@@ -177,7 +178,7 @@ Anything else is an error — jog never guesses.
 $ jog snaps src/config.yaml
 f3a9b12  8 minutes ago  claude[b3f1a2c4]: Bash(rm -rf src/old)
 D       src/config.yaml
-$ jog back src/config.yaml --at 9.minutes.ago
+$ jog back src/config.yaml --at 9m
 restored src/config.yaml from 2c4d6e8 (9 minutes ago — claude[b3f1a2c4]: prompt "clean up the src tree")
 ```
 
@@ -185,7 +186,7 @@ restored src/config.yaml from 2c4d6e8 (9 minutes ago — claude[b3f1a2c4]: promp
 deleting the files it scattered:
 
 ```console
-$ jog back --all --at 25.minutes.ago
+$ jog back --all --at 25m
 restored to 9e8d7c6 (26 minutes ago — manual: before parser rewrite): 11 restored, 3 deleted
 (undo: jog back --all)
 ```
