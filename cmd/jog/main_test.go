@@ -715,7 +715,14 @@ func TestDoctor(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(home, ".claude", "settings.json"), []byte(settings), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	env := []string{"HOME=" + home, "PATH=/usr/bin:/bin"}
+	// An editor hook is a trigger too — doctor should report it.
+	if err := os.MkdirAll(filepath.Join(home, ".vim", "plugin"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(home, ".vim", "plugin", "jog.vim"), []byte("\" jog\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	env := []string{"HOME=" + home, "XDG_CONFIG_HOME=", "PATH=/usr/bin:/bin"}
 
 	// Engine never run: the loudest finding doctor exists for.
 	tr := testrepo.New(t)
@@ -733,7 +740,7 @@ func TestDoctor(t *testing.T) {
 		t.Errorf("healthy repo: code=%d\n%s", code, stdout)
 	}
 	if !strings.Contains(stdout, "no findings") || !strings.Contains(stdout, "claude hooks") ||
-		!strings.Contains(stdout, "claude skill") {
+		!strings.Contains(stdout, "claude skill") || !strings.Contains(stdout, "vim editor") {
 		t.Errorf("healthy output:\n%s", stdout)
 	}
 
@@ -769,7 +776,7 @@ func TestDoctor(t *testing.T) {
 	tr2.Commit("base")
 	runJog(t, tr2.Dir, "-m", "first")
 	stdout, _, code = runJogEnv(t, tr2.Dir, []string{"HOME=" + bare}, "doctor")
-	if code != 1 || !strings.Contains(stdout, "neither the alias nor agent hooks") {
+	if code != 1 || !strings.Contains(stdout, "neither the alias nor agent/editor hooks") {
 		t.Errorf("no triggers: code=%d\n%s", code, stdout)
 	}
 }
@@ -1003,7 +1010,7 @@ func TestVerbAliases(t *testing.T) {
 // --help) belongs to real git. (TestHelp covers the global forms.)
 func TestPerCommandHelp(t *testing.T) {
 	dir := t.TempDir() // outside any repo: help must not need one
-	verbs := []string{"log", "snaps", "pick", "since", "restore", "back", "trim", "config", "doctor", "hook", "agents", "agent"}
+	verbs := []string{"log", "snaps", "pick", "since", "restore", "back", "trim", "config", "doctor", "hook", "agents", "agent", "editors", "editor", "editor-hook"}
 	for _, v := range verbs {
 		stdout, _, code := runJog(t, dir, v, "--help")
 		if code != 0 || !strings.Contains(stdout, "usage:") || !strings.Contains(stdout, v) {
@@ -1555,5 +1562,236 @@ func TestAgentsUninstallSurgical(t *testing.T) {
 	stdout, _, code = runJogEnv(t, dir, env, "agents", "uninstall", "hooks")
 	if code != 0 || !strings.Contains(stdout, "nothing to remove") {
 		t.Errorf("uninstall twice: code=%d\n%s", code, stdout)
+	}
+}
+
+// TestEditors: the vim lifecycle at user scope — install writes the
+// plugin and teaches the caveats, reinstall is idempotent but still
+// teaches, uninstall refuses an edited file and removes a pristine one.
+func TestEditors(t *testing.T) {
+	home := t.TempDir()
+	env := []string{"HOME=" + home, "XDG_CONFIG_HOME=", "PATH=/usr/bin:/bin"}
+	dir := t.TempDir()
+	hookFile := filepath.Join(home, ".vim", "plugin", "jog.vim")
+
+	stdout, stderr, code := runJogEnv(t, dir, env, "editors", "install", "vim")
+	if code != 0 {
+		t.Fatalf("install: code=%d stderr=%s", code, stderr)
+	}
+	for _, want := range []string{"installed", "every save inside a git repo", "jog editors uninstall vim"} {
+		if !strings.Contains(stdout, want) {
+			t.Errorf("install output missing %q:\n%s", want, stdout)
+		}
+	}
+	b, err := os.ReadFile(hookFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(b), "editor-hook") {
+		t.Errorf("plugin does not invoke the editor hook:\n%.200s", b)
+	}
+
+	// Idempotent — and the notes still print: re-running install is how
+	// you re-read the caveats.
+	stdout, _, code = runJogEnv(t, dir, env, "editors", "install", "vim")
+	if code != 0 || !strings.Contains(stdout, "already up to date") || !strings.Contains(stdout, "every save inside a git repo") {
+		t.Errorf("reinstall: code=%d\n%s", code, stdout)
+	}
+
+	stdout, _, code = runJogEnv(t, dir, env, "editors", "list")
+	if code != 0 || !strings.Contains(stdout, "~/.vim/plugin/jog.vim") || !strings.Contains(stdout, "✓ installed") {
+		t.Errorf("list after install:\n%s", stdout)
+	}
+
+	// The singular alias speaks the same command.
+	single, _, code := runJogEnv(t, dir, env, "editor", "list")
+	if code != 0 || single != stdout {
+		t.Errorf("`jog editor list` differs from `jog editors list` (code=%d)", code)
+	}
+
+	// An edited hook file is the user's now — uninstall refuses.
+	if err := os.WriteFile(hookFile, append(b, []byte("\" my tweak\n")...), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, stderr, code = runJogEnv(t, dir, env, "editors", "uninstall", "vim")
+	if code != 1 || !strings.Contains(stderr, "differs") {
+		t.Errorf("uninstall edited: code=%d stderr=%s", code, stderr)
+	}
+	if _, err := os.Stat(hookFile); err != nil {
+		t.Errorf("edited hook file was removed despite the refusal")
+	}
+
+	// Pristine again: uninstall removes it cleanly.
+	if err := os.WriteFile(hookFile, b, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	stdout, _, code = runJogEnv(t, dir, env, "editors", "uninstall", "vim")
+	if code != 0 || !strings.Contains(stdout, "removed") {
+		t.Errorf("uninstall: code=%d\n%s", code, stdout)
+	}
+	if _, err := os.Stat(hookFile); !os.IsNotExist(err) {
+		t.Errorf("hook file survived uninstall")
+	}
+	stdout, _, code = runJogEnv(t, dir, env, "editors", "list", "vim")
+	if code != 0 || !strings.Contains(stdout, "not installed") {
+		t.Errorf("list after uninstall:\n%s", stdout)
+	}
+
+	// Bare `jog editors` is a usage error.
+	_, stderr, code = runJogEnv(t, dir, env, "editors")
+	if code != 2 || !strings.Contains(stderr, "usage") {
+		t.Errorf("bare editors: code=%d stderr=%s", code, stderr)
+	}
+}
+
+// TestEditorsExactlyOne: install/uninstall take exactly one editor —
+// zero, several, and unknown names are each usage errors that say so.
+func TestEditorsExactlyOne(t *testing.T) {
+	home := t.TempDir()
+	env := []string{"HOME=" + home, "XDG_CONFIG_HOME=", "PATH=/usr/bin:/bin"}
+	dir := t.TempDir()
+
+	_, stderr, code := runJogEnv(t, dir, env, "editors", "install")
+	if code != 2 || !strings.Contains(stderr, "exactly one") || !strings.Contains(stderr, "jog editors list") {
+		t.Errorf("install no name: code=%d stderr=%s", code, stderr)
+	}
+	_, stderr, code = runJogEnv(t, dir, env, "editors", "install", "vim", "emacs")
+	if code != 2 || !strings.Contains(stderr, "one editor at a time") {
+		t.Errorf("install two names: code=%d stderr=%s", code, stderr)
+	}
+	_, stderr, code = runJogEnv(t, dir, env, "editors", "uninstall")
+	if code != 2 || !strings.Contains(stderr, "exactly one") {
+		t.Errorf("uninstall no name: code=%d stderr=%s", code, stderr)
+	}
+	_, stderr, code = runJogEnv(t, dir, env, "editors", "install", "nano")
+	if code != 2 || !strings.Contains(stderr, `unknown editor "nano"`) || !strings.Contains(stderr, "supported:") {
+		t.Errorf("unknown editor: code=%d stderr=%s", code, stderr)
+	}
+}
+
+// TestEditorsJetBrains: the one per-project editor. Outside a repo or
+// without .idea the install explains itself; inside, the XML merge adds
+// exactly jog's watcher and uninstall removes exactly it.
+func TestEditorsJetBrains(t *testing.T) {
+	home := t.TempDir()
+	env := []string{"HOME=" + home, "XDG_CONFIG_HOME=", "PATH=/usr/bin:/bin"}
+
+	// Not a repo: refused with the .idea story.
+	_, stderr, code := runJogEnv(t, t.TempDir(), env, "editors", "install", "jetbrains")
+	if code != 1 || !strings.Contains(stderr, "git repository") {
+		t.Errorf("outside repo: code=%d stderr=%s", code, stderr)
+	}
+
+	// A repo without .idea: jog won't invent project structure.
+	tr := testrepo.New(t)
+	tr.Write("a.txt", "one\n")
+	tr.Commit("base")
+	_, stderr, code = runJogEnv(t, tr.Dir, env, "editors", "install", "jetbrains")
+	if code != 1 || !strings.Contains(stderr, ".idea") {
+		t.Errorf("no .idea: code=%d stderr=%s", code, stderr)
+	}
+
+	// Seed .idea with a foreign watcher: it must survive in value terms.
+	if err := os.MkdirAll(filepath.Join(tr.Dir, ".idea"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	watcher := filepath.Join(tr.Dir, ".idea", "watcherTasks.xml")
+	foreign := `<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="ProjectTasksOptions">
+    <TaskOptions isEnabled="true">
+      <option name="name" value="prettier" />
+      <option name="program" value="prettier" />
+    </TaskOptions>
+  </component>
+</project>
+`
+	if err := os.WriteFile(watcher, []byte(foreign), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Install from a subdirectory: the file lands at the toplevel.
+	sub := filepath.Join(tr.Dir, "src")
+	if err := os.MkdirAll(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	stdout, stderr, code := runJogEnv(t, sub, env, "editors", "install", "jetbrains")
+	if code != 0 {
+		t.Fatalf("install: code=%d stderr=%s", code, stderr)
+	}
+	if !strings.Contains(stdout, "File Watchers plugin") || !strings.Contains(stdout, "re-run this in each project") {
+		t.Errorf("install notes missing:\n%s", stdout)
+	}
+	b, err := os.ReadFile(watcher)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"editor-hook jetbrains $FilePath$", "prettier", `scopeName" value="Project Files`} {
+		if !strings.Contains(string(b), want) {
+			t.Errorf("watcherTasks.xml missing %q:\n%s", want, b)
+		}
+	}
+
+	// Idempotent.
+	stdout, _, code = runJogEnv(t, tr.Dir, env, "editors", "install", "jetbrains")
+	if code != 0 || !strings.Contains(stdout, "already wired") {
+		t.Errorf("reinstall: code=%d\n%s", code, stdout)
+	}
+
+	// list shows project scope.
+	stdout, _, code = runJogEnv(t, tr.Dir, env, "editors", "list", "jetbrains")
+	if code != 0 || !strings.Contains(stdout, "(project)") {
+		t.Errorf("list: code=%d\n%s", code, stdout)
+	}
+
+	// Uninstall removes exactly jog's watcher; prettier survives.
+	stdout, _, code = runJogEnv(t, tr.Dir, env, "editors", "uninstall", "jetbrains")
+	if code != 0 || !strings.Contains(stdout, "everything else untouched") {
+		t.Errorf("uninstall: code=%d\n%s", code, stdout)
+	}
+	b, err = os.ReadFile(watcher)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(b), "editor-hook jetbrains") || !strings.Contains(string(b), "prettier") {
+		t.Errorf("uninstall was not surgical:\n%s", b)
+	}
+	stdout, _, code = runJogEnv(t, tr.Dir, env, "editors", "uninstall", "jetbrains")
+	if code != 0 || !strings.Contains(stdout, "nothing to remove") {
+		t.Errorf("uninstall twice: code=%d\n%s", code, stdout)
+	}
+}
+
+// TestEditorHookEndToEnd: the wired command itself — exit 0 with zero
+// output everywhere, and a `<editor>: save <path>` subject inside a repo.
+func TestEditorHookEndToEnd(t *testing.T) {
+	tr := testrepo.New(t)
+	tr.Write("a.txt", "one\n")
+	tr.Commit("base")
+	tr.Write("b.txt", "fresh\n") // a clean tree would no-op the snapshot
+
+	stdout, stderr, code := runJog(t, tr.Dir, "editor-hook", "vim", filepath.Join(tr.Dir, "b.txt"))
+	if code != 0 || stdout != "" || stderr != "" {
+		t.Fatalf("editor-hook: code=%d stdout=%q stderr=%q — must be silent", code, stdout, stderr)
+	}
+	if got := tr.Git("log", "-1", "--format=%s", "refs/jog/main"); got != "vim: save b.txt" {
+		t.Errorf("subject = %q", got)
+	}
+
+	// Outside a repo: silent no-op, still exit 0.
+	loose := t.TempDir()
+	file := filepath.Join(loose, "loose.txt")
+	if err := os.WriteFile(file, []byte("x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	stdout, stderr, code = runJog(t, loose, "editor-hook", "vim", file)
+	if code != 0 || stdout != "" || stderr != "" {
+		t.Errorf("outside repo: code=%d stdout=%q stderr=%q", code, stdout, stderr)
+	}
+
+	// Even bare misuse exits 0 — the iron rule.
+	_, _, code = runJog(t, loose, "editor-hook")
+	if code != 0 {
+		t.Errorf("bare editor-hook: code=%d, want 0", code)
 	}
 }

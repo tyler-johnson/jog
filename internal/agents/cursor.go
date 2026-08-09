@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"strings"
+
+	"github.com/tyler-johnson/jog/internal/install"
 )
 
 // Cursor: hooks.json in Cursor's own flat schema — {"version": 1,
@@ -27,9 +29,9 @@ var cursorAgent = client{
 	hooksLocation:  cursorHooksLocation,
 	skillPath: func(project bool) (string, error) {
 		if project {
-			return repoPath(".cursor", "skills", "jog", "SKILL.md")
+			return install.RepoPath(".cursor", "skills", "jog", "SKILL.md")
 		}
-		return homePath(".cursor", "skills", "jog", "SKILL.md")
+		return install.HomePath(".cursor", "skills", "jog", "SKILL.md")
 	},
 }
 
@@ -37,9 +39,9 @@ var cursorHookEvents = []string{"beforeShellExecution", "afterFileEdit", "before
 
 func cursorHooksPath(project bool) (string, error) {
 	if project {
-		return repoPath(".cursor", "hooks.json")
+		return install.RepoPath(".cursor", "hooks.json")
 	}
-	return homePath(".cursor", "hooks.json")
+	return install.HomePath(".cursor", "hooks.json")
 }
 
 func cursorHooksInstall(project bool) (string, bool, error) {
@@ -47,7 +49,7 @@ func cursorHooksInstall(project bool) (string, bool, error) {
 	if err != nil {
 		return "", false, err
 	}
-	m, err := loadSettings(path)
+	m, err := install.LoadJSON(path)
 	if err != nil {
 		return "", false, err
 	}
@@ -81,7 +83,7 @@ func cursorHooksInstall(project bool) (string, bool, error) {
 	if len(added) == 0 {
 		return "already wired in " + path, false, nil
 	}
-	if err := writeSettings(path, m); err != nil {
+	if err := install.WriteJSON(path, m); err != nil {
 		return "", false, err
 	}
 	return "wired " + strings.Join(added, ", ") + " in " + path + " (command: " + cmd + ")", true, nil
@@ -105,7 +107,7 @@ func cursorHooksUninstall(project bool) (string, bool, error) {
 	if _, err := os.Stat(path); os.IsNotExist(err) {
 		return "no settings file at " + path + " — nothing to remove", false, nil
 	}
-	m, err := loadSettings(path)
+	m, err := install.LoadJSON(path)
 	if err != nil {
 		return "", false, err
 	}
@@ -143,7 +145,7 @@ func cursorHooksUninstall(project bool) (string, bool, error) {
 	if removed == 0 {
 		return "no jog hooks in " + path + " — nothing to remove", false, nil
 	}
-	if err := writeSettings(path, m); err != nil {
+	if err := install.WriteJSON(path, m); err != nil {
 		return "", false, err
 	}
 	return fmt.Sprintf("removed %d jog hook(s) from %s — everything else untouched", removed, path), true, nil
@@ -151,10 +153,10 @@ func cursorHooksUninstall(project bool) (string, bool, error) {
 
 func cursorHooksLocation() string {
 	if p, err := cursorHooksPath(false); err == nil && cursorFileWired(p) {
-		return tildePath(p)
+		return install.TildePath(p)
 	}
 	if p, err := cursorHooksPath(true); err == nil && cursorFileWired(p) {
-		return projectPathDisplay(p)
+		return install.ProjectDisplay(p)
 	}
 	return ""
 }

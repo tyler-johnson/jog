@@ -5,6 +5,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+
+	"github.com/tyler-johnson/jog/internal/install"
 )
 
 // OpenCode: no declarative hook config — lifecycle hooks are JavaScript
@@ -29,7 +31,7 @@ var opencodeAgent = client{
 			return true
 		}
 		home, err := os.UserHomeDir()
-		return err == nil && fileExists(filepath.Join(home, ".config", "opencode"))
+		return err == nil && install.FileExists(filepath.Join(home, ".config", "opencode"))
 	},
 	hooksPath:      opencodeHooksPath,
 	hooksInstall:   opencodeHooksInstall,
@@ -37,17 +39,17 @@ var opencodeAgent = client{
 	hooksLocation:  opencodeHooksLocation,
 	skillPath: func(project bool) (string, error) {
 		if project {
-			return repoPath(".opencode", "skills", "jog", "SKILL.md")
+			return install.RepoPath(".opencode", "skills", "jog", "SKILL.md")
 		}
-		return homePath(".config", "opencode", "skills", "jog", "SKILL.md")
+		return install.HomePath(".config", "opencode", "skills", "jog", "SKILL.md")
 	},
 }
 
 func opencodeHooksPath(project bool) (string, error) {
 	if project {
-		return repoPath(".opencode", "plugins", "jog.js")
+		return install.RepoPath(".opencode", "plugins", "jog.js")
 	}
-	return homePath(".config", "opencode", "plugins", "jog.js")
+	return install.HomePath(".config", "opencode", "plugins", "jog.js")
 }
 
 func opencodeHooksInstall(project bool) (string, bool, error) {
@@ -55,7 +57,7 @@ func opencodeHooksInstall(project bool) (string, bool, error) {
 	if err != nil {
 		return "", false, err
 	}
-	msg, did, err := installManagedFile(path, opencodePlugin)
+	msg, did, err := install.ManagedFile(path, opencodePlugin)
 	if err != nil {
 		return "", false, err
 	}
@@ -70,15 +72,15 @@ func opencodeHooksUninstall(project bool) (string, bool, error) {
 	if err != nil {
 		return "", false, err
 	}
-	return removeManagedFile(path, opencodePlugin)
+	return install.RemoveManagedFile(path, opencodePlugin)
 }
 
 func opencodeHooksLocation() string {
-	if p, err := opencodeHooksPath(false); err == nil && fileExists(p) {
-		return tildePath(p)
+	if p, err := opencodeHooksPath(false); err == nil && install.FileExists(p) {
+		return install.TildePath(p)
 	}
-	if p, err := opencodeHooksPath(true); err == nil && fileExists(p) {
-		return projectPathDisplay(p)
+	if p, err := opencodeHooksPath(true); err == nil && install.FileExists(p) {
+		return install.ProjectDisplay(p)
 	}
 	return ""
 }

@@ -1,6 +1,10 @@
 package agents
 
-import "path/filepath"
+import (
+	"path/filepath"
+
+	"github.com/tyler-johnson/jog/internal/install"
+)
 
 // Claude Code: hooks in JSON settings files, skill under .claude/skills/.
 //
@@ -18,16 +22,16 @@ var claudeAgent = client{
 	},
 	hooksPath: func(project bool) (string, error) {
 		if project {
-			return repoPath(".claude", "settings.local.json")
+			return install.RepoPath(".claude", "settings.local.json")
 		}
-		return homePath(".claude", "settings.json")
+		return install.HomePath(".claude", "settings.json")
 	},
 	hooksLocation: claudeHooksLocation,
 	skillPath: func(project bool) (string, error) {
 		if project {
-			return repoPath(".claude", "skills", "jog", "SKILL.md")
+			return install.RepoPath(".claude", "skills", "jog", "SKILL.md")
 		}
-		return homePath(".claude", "skills", "jog", "SKILL.md")
+		return install.HomePath(".claude", "skills", "jog", "SKILL.md")
 	},
 }
 
@@ -36,10 +40,10 @@ var claudeAgent = client{
 // shared file because the README documents wiring it by hand) — or ""
 // when it isn't.
 func claudeHooksLocation() string {
-	if p, err := homePath(".claude", "settings.json"); err == nil && hooksFileWired(p, "claude") {
-		return tildePath(p)
+	if p, err := install.HomePath(".claude", "settings.json"); err == nil && hooksFileWired(p, "claude") {
+		return install.TildePath(p)
 	}
-	if root, err := projectRoot(); err == nil {
+	if root, err := install.ProjectRoot(); err == nil {
 		for _, f := range []string{"settings.json", "settings.local.json"} {
 			if hooksFileWired(filepath.Join(root, ".claude", f), "claude") {
 				return ".claude/" + f + " (project)"

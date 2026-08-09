@@ -269,8 +269,10 @@ the model's context.
 
 ### git alias (secondary — the human) and `jog` bare (deliberate checkpoints)
 
-Covered in §5. Optional future adapters (same engine, no design change): zsh
-preexec one-liner, editor save hook, post-op beacon. None planned for v1.
+Covered in §5. The editor save hook shipped as `jog editors` (post-save
+snapshots via `jog editor-hook <editor>` — the one post-state trigger, since
+the saved state is the checkpoint). Other optional adapters (same engine, no
+design change): zsh preexec one-liner, post-op beacon.
 
 ## 7. Retention
 

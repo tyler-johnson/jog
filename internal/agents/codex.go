@@ -1,5 +1,7 @@
 package agents
 
+import "github.com/tyler-johnson/jog/internal/install"
+
 // Codex: hooks in .codex/hooks.json (same event → matcher group → command
 // JSON shape as Claude's), skill under the cross-agent .agents/skills/
 // standard directory. Codex requires non-managed hooks to be trusted via
@@ -19,14 +21,14 @@ var codexAgent = client{
 	installNote: "; review with /hooks",
 	hooksPath: func(project bool) (string, error) {
 		if project {
-			return repoPath(".codex", "hooks.json")
+			return install.RepoPath(".codex", "hooks.json")
 		}
-		return homePath(".codex", "hooks.json")
+		return install.HomePath(".codex", "hooks.json")
 	},
 	skillPath: func(project bool) (string, error) {
 		if project {
-			return repoPath(".agents", "skills", "jog", "SKILL.md")
+			return install.RepoPath(".agents", "skills", "jog", "SKILL.md")
 		}
-		return homePath(".agents", "skills", "jog", "SKILL.md")
+		return install.HomePath(".agents", "skills", "jog", "SKILL.md")
 	},
 }

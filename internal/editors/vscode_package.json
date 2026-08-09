@@ -1,0 +1,11 @@
+{
+  "name": "jog",
+  "displayName": "jog",
+  "description": "A memory for your working tree — snapshots the repo on every save. Installed by `jog editors install`; `jog editors uninstall vscode` removes it.",
+  "publisher": "jog",
+  "version": "0.0.1",
+  "license": "MIT",
+  "engines": { "vscode": "^1.75.0" },
+  "main": "./extension.js",
+  "activationEvents": ["onStartupFinished"]
+}

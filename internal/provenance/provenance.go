@@ -50,6 +50,18 @@ func Agent(name, sessionID, detail string) string {
 	return src + ": " + Truncate(detail, maxHookDetail)
 }
 
+// Save is an editor save-hook snapshot: `<editor>: save <path>`. No
+// session bracket — saves have no session; the editor name alone groups
+// them in the timeline. Unlike Pre, the snapshot is taken after the save:
+// the saved state is the checkpoint (pre-save state is the editor's own
+// undo).
+func Save(editor, path string) string {
+	if path == "" {
+		return editor + ": save"
+	}
+	return editor + ": save " + Truncate(path, maxHookDetail)
+}
+
 // Truncate collapses all whitespace runs (including newlines) to single
 // spaces and caps the result at n runes, ellipsizing.
 func Truncate(s string, n int) string {

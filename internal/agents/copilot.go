@@ -1,5 +1,7 @@
 package agents
 
+import "github.com/tyler-johnson/jog/internal/install"
+
 // GitHub Copilot CLI: hooks live under the "hooks" key of its settings
 // files, using its documented Claude-compatible mode — PascalCase event
 // names get Claude-style matcher semantics (native tool names map to
@@ -22,14 +24,14 @@ var copilotAgent = client{
 	},
 	hooksPath: func(project bool) (string, error) {
 		if project {
-			return repoPath(".github", "copilot", "settings.local.json")
+			return install.RepoPath(".github", "copilot", "settings.local.json")
 		}
-		return homePath(".copilot", "settings.json")
+		return install.HomePath(".copilot", "settings.json")
 	},
 	skillPath: func(project bool) (string, error) {
 		if project {
-			return repoPath(".github", "skills", "jog", "SKILL.md")
+			return install.RepoPath(".github", "skills", "jog", "SKILL.md")
 		}
-		return homePath(".copilot", "skills", "jog", "SKILL.md")
+		return install.HomePath(".copilot", "skills", "jog", "SKILL.md")
 	},
 }

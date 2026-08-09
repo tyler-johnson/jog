@@ -18,6 +18,7 @@ import (
 
 	"github.com/tyler-johnson/jog/internal/agents"
 	"github.com/tyler-johnson/jog/internal/cli"
+	"github.com/tyler-johnson/jog/internal/editors"
 )
 
 const usage = `jog — a memory for your working tree
@@ -30,7 +31,9 @@ usage:
   jog restore <path> [--at T]  restore files from a snapshot
   jog restore --all [--at T]   restore the whole working tree
   jog agents install           hooks + skill for every agent client on this machine (uninstall, list; --project)
+  jog editors install <name>   post-save snapshots for one text editor (uninstall, list)
   jog hook <client>            agent hook entry point (reads JSON on stdin)
+  jog editor-hook <editor>     editor save hook entry point (file path as argument)
   jog git <args>               snapshot, then run the real git command
   jog trim [--dry-run]         apply the retention taper; drop thinned snapshots
   jog config [key [value]]     list jog's settings — or get, set (--unset, --global)
@@ -63,6 +66,34 @@ The default scope is the home directory, so the wiring covers every
 repo; --project scopes it to the current repo instead. Existing JSON
 fields are preserved, malformed JSON is never rewritten, and uninstall
 refuses to delete a skill file carrying local edits.
+`
+
+// editorsHelp is shared by editors and its alias editor.
+const editorsHelp = `jog editors — editor save hooks
+
+usage:
+  jog editors install <editor>
+  jog editors uninstall <editor>
+  jog editors list
+
+Installs a post-save hook into one text editor, so every save inside a
+git repo becomes a restorable snapshot — "vim: save src/main.go" in the
+timeline. Unlike jog's other triggers this snapshots after the save: the
+saved state is the checkpoint (pre-save state is your editor's undo).
+
+install and uninstall take exactly one editor name per invocation, and
+print how that editor's integration works and its gotchas; jog editors
+list shows the supported names and what is installed. Everything
+installs into your user configuration, covering every repo — except
+jetbrains, whose hook can only live in a project's .idea directory:
+re-run it in each project you want covered.
+
+The wired hook runs ` + "`jog editor-hook <editor>`" + `, always exits 0, prints
+nothing, and is a fast no-op outside git repos. uninstall removes
+exactly what install wrote and refuses to delete a file carrying your
+edits.
+
+supported: vim, nvim, emacs, sublime, kakoune, micro, vscode, jetbrains
 `
 
 // logHelp is shared by log and its aliases snaps and pick.
@@ -207,8 +238,22 @@ These are the commands ` + "`jog agents install`" + ` wires into each
 client's settings; they are not meant to be run by hand. The client
 names are the ones ` + "`jog agents list`" + ` shows.
 `,
-	"agents": agentsHelp,
-	"agent":  agentsHelp,
+	"agents":  agentsHelp,
+	"agent":   agentsHelp,
+	"editors": editorsHelp,
+	"editor":  editorsHelp,
+	"editor-hook": `jog editor-hook — editor save hook entry point
+
+usage:
+  jog editor-hook <editor> [file]    (the editor invokes this on save)
+
+Snapshots the repository containing the saved file, and always exits 0
+with no output — a failing hook must never disturb a save. The repo is
+discovered from the file's own directory, so the editor's working
+directory does not matter; outside a git repo it is a fast no-op. These
+are the commands ` + "`jog editors install`" + ` wires; they are not
+meant to be run by hand.
+`,
 	"git": `jog git — snapshot, then run the real git command
 
 usage:
@@ -293,6 +338,18 @@ func run(args []string) int {
 		return 0
 	case "agents", "agent":
 		return agents.Run(args[1:])
+	case "editors", "editor":
+		return editors.Run(args[1:])
+	case "editor-hook":
+		// Runtime entry wired by `jog editors install`: exit 0 always,
+		// print nothing — output lands in the editor's UI. (A saved file
+		// literally named --help is caught by the help interception above;
+		// it still exits 0 there, so a save is never disturbed.)
+		if len(args) >= 2 {
+			return cli.EditorHook(args[1], args[2:])
+		}
+		fmt.Fprintln(os.Stderr, "jog: editor-hook wants an editor name — it is wired by `jog editors install`, not run by hand")
+		return 0
 	case "hooks", "skill", "skills":
 		fmt.Fprintf(os.Stderr, "jog: %q moved — `jog agents install|uninstall|list` manages hooks and skills\n", args[0])
 		return 2

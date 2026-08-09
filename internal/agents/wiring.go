@@ -6,16 +6,15 @@ import (
 	"maps"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
-
-	"github.com/tyler-johnson/jog/internal/gitx"
 )
 
 // Shared hook-wiring mechanics — everything here is client-agnostic;
 // per-client facts (events, paths) live in claude.go and codex.go. The
 // commands written into settings are runtime entries such as `jog hook
-// claude`; this file only edits configuration.
+// claude`; this file only edits configuration. Path resolution and
+// managed-file mechanics live in internal/install, shared with `jog
+// editors`.
 
 // hookEvent is one event install wires: its name and an optional tool
 // matcher.
@@ -32,92 +31,6 @@ func hookCommand(client string) string {
 		return exe + " hook " + client
 	}
 	return "jog hook " + client
-}
-
-// homePath joins elems under the home directory.
-func homePath(elems ...string) (string, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", fmt.Errorf("cannot resolve home directory: %w", err)
-	}
-	return filepath.Join(append([]string{home}, elems...)...), nil
-}
-
-// repoPath joins elems under the project root: the repo toplevel when
-// inside one, else the cwd.
-func repoPath(elems ...string) (string, error) {
-	root, err := projectRoot()
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(append([]string{root}, elems...)...), nil
-}
-
-func projectRoot() (string, error) {
-	wd, err := os.Getwd()
-	if err != nil {
-		return "", err
-	}
-	if repo, err := gitx.Discover(wd); err == nil && !repo.Bare {
-		if top, err := repo.Run("rev-parse", "--show-toplevel"); err == nil && top != "" {
-			return top, nil
-		}
-	}
-	return wd, nil
-}
-
-// tildePath renders a home-anchored absolute path as ~/… for display.
-func tildePath(p string) string {
-	if home, err := os.UserHomeDir(); err == nil {
-		if rel, err := filepath.Rel(home, p); err == nil && !strings.HasPrefix(rel, "..") {
-			return "~/" + filepath.ToSlash(rel)
-		}
-	}
-	return p
-}
-
-// projectPathDisplay renders a path inside the project root relative,
-// tagged as project scope.
-func projectPathDisplay(p string) string {
-	if root, err := projectRoot(); err == nil {
-		if rel, err := filepath.Rel(root, p); err == nil && !strings.HasPrefix(rel, "..") {
-			return filepath.ToSlash(rel) + " (project)"
-		}
-	}
-	return p
-}
-
-// loadSettings parses an agent JSON configuration file into a generic map so
-// every field jog doesn't understand round-trips untouched. A missing file
-// is an empty map; malformed JSON is a hard error — never rewrite a file
-// that can't be read back faithfully.
-func loadSettings(path string) (map[string]any, error) {
-	b, err := os.ReadFile(path)
-	if os.IsNotExist(err) {
-		return map[string]any{}, nil
-	}
-	if err != nil {
-		return nil, err
-	}
-	var m map[string]any
-	if err := json.Unmarshal(b, &m); err != nil {
-		return nil, fmt.Errorf("%s is not valid JSON (%v) — fix it, or wire the hooks by hand", path, err)
-	}
-	if m == nil {
-		m = map[string]any{}
-	}
-	return m, nil
-}
-
-func writeSettings(path string, m map[string]any) error {
-	b, err := json.MarshalIndent(m, "", "  ")
-	if err != nil {
-		return err
-	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return err
-	}
-	return os.WriteFile(path, append(b, '\n'), 0o644)
 }
 
 // wireHooks adds the jog hook entries that are missing and reports which

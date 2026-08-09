@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/tyler-johnson/jog/internal/agents"
+	"github.com/tyler-johnson/jog/internal/editors"
 	"github.com/tyler-johnson/jog/internal/gitx"
 	"github.com/tyler-johnson/jog/internal/snap"
 )
@@ -222,6 +223,21 @@ func (d *doctor) checkTriggers() {
 		d.info("agent clients", fmt.Sprintf("%d more supported, not integrated (optional — `jog agents install`)", absent))
 	}
 
+	// Editor save hooks are triggers too — one line per installed editor,
+	// the uninstalled majority collapsed, same shape as the agents above.
+	absentEditors := 0
+	for _, s := range editors.Statuses() {
+		if s.Location == "" {
+			absentEditors++
+			continue
+		}
+		d.ok(s.Name+" editor", "`jog editor-hook "+s.Name+"` wired at "+s.Location)
+		hooks = true
+	}
+	if absentEditors > 0 {
+		d.info("editors", fmt.Sprintf("%d supported, not integrated (optional — `jog editors install <name>`)", absentEditors))
+	}
+
 	aliasFile := ""
 	for _, rc := range []string{".bashrc", ".zshrc", ".config/fish/config.fish", ".profile"} {
 		b, err := os.ReadFile(filepath.Join(home, rc))
@@ -237,7 +253,7 @@ func (d *doctor) checkTriggers() {
 	}
 
 	if !hooks && aliasFile == "" {
-		d.warn("triggers", "neither the alias nor agent hooks are wired — snapshots only happen when you run `jog` by hand (`jog agents install`, or add the alias)")
+		d.warn("triggers", "neither the alias nor agent/editor hooks are wired — snapshots only happen when you run `jog` by hand (`jog agents install`, `jog editors install <name>`, or add the alias)")
 	}
 }
 

@@ -17,7 +17,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/charmbracelet/lipgloss"
+	"github.com/tyler-johnson/jog/internal/install"
 )
 
 // client declares one supported agent client: its hook events, where each
@@ -69,7 +69,7 @@ func (c client) detected() bool {
 		return true
 	}
 	home, err := os.UserHomeDir()
-	return err == nil && fileExists(filepath.Join(home, "."+c.name))
+	return err == nil && install.FileExists(filepath.Join(home, "."+c.name))
 }
 
 func (c client) installHooks(project bool) (string, bool, error) {
@@ -80,7 +80,7 @@ func (c client) installHooks(project bool) (string, bool, error) {
 	if err != nil {
 		return "", false, err
 	}
-	m, err := loadSettings(path)
+	m, err := install.LoadJSON(path)
 	if err != nil {
 		return "", false, err
 	}
@@ -92,7 +92,7 @@ func (c client) installHooks(project bool) (string, bool, error) {
 	if len(added) == 0 {
 		return "already wired in " + path, false, nil
 	}
-	if err := writeSettings(path, m); err != nil {
+	if err := install.WriteJSON(path, m); err != nil {
 		return "", false, err
 	}
 	return "wired " + strings.Join(added, " and ") + " in " + path +
@@ -110,7 +110,7 @@ func (c client) uninstallHooks(project bool) (string, bool, error) {
 	if _, err := os.Stat(path); os.IsNotExist(err) {
 		return "no settings file at " + path + " — nothing to remove", false, nil
 	}
-	m, err := loadSettings(path)
+	m, err := install.LoadJSON(path)
 	if err != nil {
 		return "", false, err
 	}
@@ -118,7 +118,7 @@ func (c client) uninstallHooks(project bool) (string, bool, error) {
 	if removed == 0 {
 		return "no jog hooks in " + path + " — nothing to remove", false, nil
 	}
-	if err := writeSettings(path, m); err != nil {
+	if err := install.WriteJSON(path, m); err != nil {
 		return "", false, err
 	}
 	return fmt.Sprintf("removed %d jog hook(s) from %s — everything else untouched", removed, path), true, nil
@@ -131,10 +131,10 @@ func (c client) whereHooks() string {
 		return c.hooksLocation()
 	}
 	if p, err := c.hooksPath(false); err == nil && hooksFileWired(p, c.name) {
-		return tildePath(p)
+		return install.TildePath(p)
 	}
 	if p, err := c.hooksPath(true); err == nil && hooksFileWired(p, c.name) {
-		return projectPathDisplay(p)
+		return install.ProjectDisplay(p)
 	}
 	return ""
 }
@@ -144,7 +144,7 @@ func (c client) installSkill(project bool) (string, bool, error) {
 	if err != nil {
 		return "", false, err
 	}
-	return installManagedFile(path, agentSkill)
+	return install.ManagedFile(path, agentSkill)
 }
 
 func (c client) uninstallSkill(project bool) (string, bool, error) {
@@ -152,17 +152,17 @@ func (c client) uninstallSkill(project bool) (string, bool, error) {
 	if err != nil {
 		return "", false, err
 	}
-	return removeManagedFile(path, agentSkill)
+	return install.RemoveManagedFile(path, agentSkill)
 }
 
 // skillLocation reports where the skill is installed — user scope first,
 // then the current repo — or "" when it isn't.
 func (c client) skillLocation() string {
-	if p, err := c.skillPath(false); err == nil && fileExists(p) {
-		return tildePath(p)
+	if p, err := c.skillPath(false); err == nil && install.FileExists(p) {
+		return install.TildePath(p)
 	}
-	if p, err := c.skillPath(true); err == nil && fileExists(p) {
-		return projectPathDisplay(p)
+	if p, err := c.skillPath(true); err == nil && install.FileExists(p) {
+		return install.ProjectDisplay(p)
 	}
 	return ""
 }
@@ -244,38 +244,16 @@ func Run(args []string) int {
 	case "list":
 		return list(targets, hooks, skill)
 	case "install":
-		return install(targets, len(names) > 0, hooks, skill, project)
+		return installClients(targets, len(names) > 0, hooks, skill, project)
 	default:
-		return uninstall(targets, hooks, skill, project)
+		return uninstallClients(targets, hooks, skill, project)
 	}
 }
 
-// Output styles, shared by list/install/uninstall. lipgloss drops the
-// styling on non-TTY output, so piped output stays plain text.
-var (
-	styleTitle = lipgloss.NewStyle().Bold(true)
-	styleGood  = lipgloss.NewStyle().Foreground(lipgloss.Color("2"))
-	styleDim   = lipgloss.NewStyle().Faint(true)
-)
+// Output vocabulary lives in internal/install, shared with `jog editors`.
+func clientHeader(c client, i int) { install.Header(c.name, c.title, i) }
 
-// clientHeader opens a client's output block: bold name, faint title,
-// blank line between blocks.
-func clientHeader(c client, i int) {
-	if i > 0 {
-		fmt.Println()
-	}
-	fmt.Println(styleTitle.Render(c.name) + styleDim.Render(" — "+c.title))
-}
-
-// surfaceRow prints one surface's outcome: a green check when something
-// was (or is) in place, a faint dot for the no-op cases.
-func surfaceRow(surface, msg string, did bool) {
-	if did {
-		fmt.Printf("  %-6s %s %s\n", surface, styleGood.Render("✓"), msg)
-	} else {
-		fmt.Printf("  %-6s %s\n", surface, styleDim.Render("· "+msg))
-	}
-}
+var surfaceRow = install.Row
 
 // list groups output per client: a title line, then one line per
 // requested surface. Clients with no binary, no config, and no jog
@@ -284,16 +262,16 @@ func surfaceRow(surface, msg string, did bool) {
 func list(targets []client, hooks, skill bool) int {
 	surface := func(name, loc string) {
 		if loc != "" {
-			fmt.Printf("  %-6s %s  %s\n", name, styleGood.Render("✓ installed"), loc)
+			fmt.Printf("  %-6s %s  %s\n", name, install.StyleGood.Render("✓ installed"), loc)
 		} else {
-			fmt.Printf("  %-6s %s\n", name, styleDim.Render("· not installed"))
+			fmt.Printf("  %-6s %s\n", name, install.StyleDim.Render("· not installed"))
 		}
 	}
 	for i, c := range targets {
 		clientHeader(c, i)
 		hooksLoc, skillLoc := c.whereHooks(), c.skillLocation()
 		if !c.detected() && hooksLoc == "" && skillLoc == "" {
-			fmt.Println(styleDim.Render("  not found on this machine — `jog agents install " + c.name + "` forces it"))
+			fmt.Println(install.StyleDim.Render("  not found on this machine — `jog agents install " + c.name + "` forces it"))
 			continue
 		}
 		if hooks {
@@ -306,16 +284,16 @@ func list(targets []client, hooks, skill bool) int {
 	return 0
 }
 
-// install wires the requested surfaces. Detection gates only the
+// installClients wires the requested surfaces. Detection gates only the
 // no-names path: a client the user names is installed for regardless —
 // they know their machine better than a heuristic does.
-func install(targets []client, explicit, hooks, skill, project bool) int {
+func installClients(targets []client, explicit, hooks, skill, project bool) int {
 	code := 0
 	changed := false
 	for i, c := range targets {
 		clientHeader(c, i)
 		if !explicit && !c.detected() {
-			fmt.Println(styleDim.Render("  not found — skipped (`jog agents install " + c.name + "` to force)"))
+			fmt.Println(install.StyleDim.Render("  not found — skipped (`jog agents install " + c.name + "` to force)"))
 			continue
 		}
 		if hooks {
@@ -351,7 +329,7 @@ func install(targets []client, explicit, hooks, skill, project bool) int {
 	return code
 }
 
-func uninstall(targets []client, hooks, skill, project bool) int {
+func uninstallClients(targets []client, hooks, skill, project bool) int {
 	code := 0
 	for i, c := range targets {
 		clientHeader(c, i)
@@ -375,9 +353,4 @@ func uninstall(targets []client, hooks, skill, project bool) int {
 		}
 	}
 	return code
-}
-
-func fileExists(path string) bool {
-	_, err := os.Stat(path)
-	return err == nil
 }

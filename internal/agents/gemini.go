@@ -1,5 +1,7 @@
 package agents
 
+import "github.com/tyler-johnson/jog/internal/install"
+
 // Gemini CLI: hooks live under the "hooks" key of its settings.json, in
 // the same event → matcher group → command JSON shape as Claude's, with
 // one addition — each entry carries a "name", which Gemini's hook-trust
@@ -17,14 +19,14 @@ var geminiAgent = client{
 	hookExtras: map[string]any{"name": "jog"},
 	hooksPath: func(project bool) (string, error) {
 		if project {
-			return repoPath(".gemini", "settings.json")
+			return install.RepoPath(".gemini", "settings.json")
 		}
-		return homePath(".gemini", "settings.json")
+		return install.HomePath(".gemini", "settings.json")
 	},
 	skillPath: func(project bool) (string, error) {
 		if project {
-			return repoPath(".gemini", "skills", "jog", "SKILL.md")
+			return install.RepoPath(".gemini", "skills", "jog", "SKILL.md")
 		}
-		return homePath(".gemini", "skills", "jog", "SKILL.md")
+		return install.HomePath(".gemini", "skills", "jog", "SKILL.md")
 	},
 }

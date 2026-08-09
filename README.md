@@ -27,6 +27,7 @@ restored to c0ffee1 (2 minutes ago — pre: git status): 14 restored, 0 deleted
 - [Why jog](#why-jog)
 - [Install](#install)
 - [Agents](#agents)
+- [Editors](#editors)
 - [Usage](#usage)
 - [Recovery cookbook](#recovery-cookbook)
 - [What jog will never touch](#what-jog-will-never-touch)
@@ -161,6 +162,44 @@ Everything installs globally, so one wiring covers every repo — pass
 > JSON is never rewritten, and uninstall refuses to delete a skill file
 > carrying local edits. The install output prints every path it touched.
 
+## Editors
+
+Agents get hooks; so do humans. `jog editors install <editor>` drops a
+post-save hook into your editor, so every save inside a git repo becomes a
+restorable snapshot — `vim: save src/main.go` in the timeline. This is the
+one trigger that snapshots *after* the fact: the saved state is the
+checkpoint (the pre-save state is your editor's own undo).
+
+| editor | hook lands in | takes effect |
+|---|---|---|
+| `vim` | `~/.vim/plugin/jog.vim` | new sessions |
+| `nvim` | `~/.config/nvim/plugin/jog.vim` | new sessions |
+| `emacs` | `~/.emacs.d/jog.el` | after one `(load …)` line in your init file |
+| `sublime` | `Packages/User/jog.py` (per-OS path) | immediately |
+| `kakoune` | `~/.config/kak/` (autoload, or sourced from kakrc) | new sessions |
+| `micro` | `~/.config/micro/plug/jog/jog.lua` | new sessions |
+| `vscode` | `~/.vscode/extensions/jog.jog-0.0.1/` | after a full restart |
+| `jetbrains` | `.idea/watcherTasks.xml` — per project | after a project reload; needs the File Watchers plugin |
+
+```sh
+jog editors list             # every supported editor and what's installed
+jog editors install vim      # one editor at a time — each has its own gotchas
+jog editors uninstall vim    # removes exactly what install wrote
+```
+
+install and uninstall take exactly one editor per run — the install output
+is where each editor's how-it-works and caveats are taught. Everything
+installs globally except `jetbrains`, whose hook can only live in a
+project's `.idea` directory: re-run it in each project you want covered.
+
+> [!NOTE]
+> The wired hook (`jog editor-hook <editor>`) always exits 0 and prints
+> nothing — a jog failure can never disturb a save — and it exits in
+> milliseconds outside git repos. Uninstall refuses to delete a hook file
+> carrying local edits. GUI editors get jog's absolute path baked in
+> (desktop launches don't inherit your shell's PATH); re-run install if
+> you move jog.
+
 ## Usage
 
 Two disjoint namespaces, one rule: **`jog git` is the only door to git.**
@@ -178,6 +217,7 @@ Two disjoint namespaces, one rule: **`jog git` is the only door to git.**
 | `jog config [key [value]]` | list jog's settings with values and meanings — or get and set them |
 | `jog doctor [--fix]` | verify invariants, wiring, and liveness (`--fix` repairs the gc config) |
 | `jog agents install` | hooks + skill for every agent client on this machine (`uninstall`, `list`; `[hooks\|skill]` and client names narrow it; `--project`: this repo) |
+| `jog editors install <name>` | a post-save snapshot hook for one text editor (`uninstall`, `list`) |
 | `jog version` | print jog's version |
 
 `--at` (and `since`'s target slot) accepts a snap id from `jog log` or a
@@ -333,7 +373,8 @@ validated through git's own parsers:
 - **[gitwatch](https://github.com/gitwatch/gitwatch)** — commits your real
   branch on a watcher; pollutes history.
 - **Editor local history** (VS Code, JetBrains) — blind to terminal and
-  agent changes, short retention, not in git.
+  agent changes, short retention, not in git. jog's [editor hooks](#editors)
+  put saves on the same timeline as everything else.
 - **Claude Code checkpoints** — conversation + Edit/Write only; no bash
   changes, no untracked files, capped at 100 checkpoints / 30 days. jog is
   the other half.
