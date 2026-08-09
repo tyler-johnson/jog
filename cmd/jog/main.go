@@ -16,6 +16,7 @@ import (
 	"runtime/debug"
 	"strings"
 
+	"github.com/tyler-johnson/jog/internal/agents"
 	"github.com/tyler-johnson/jog/internal/cli"
 )
 
@@ -29,7 +30,7 @@ usage:
   jog back <path> [--at T]  restore one file from a snapshot
   jog back --all --at T     restore the whole working tree
   jog agents install        hooks + skill for every agent client on this machine (uninstall, list; --project)
-  jog hook claude           Claude Code hook entry point (reads JSON on stdin)
+  jog hook claude|codex     agent hook entry point (reads JSON on stdin)
   jog git <args>            snapshot, then run the real git command
   jog pick [--all] <path>   scrub through a file's versions and restore one
   jog trim [--dry-run]      apply the retention taper; drop thinned snapshots
@@ -56,14 +57,15 @@ call) and a skill (teaches the agent the recovery workflow — find
 versions, restore, checkpoint before risk). install covers both for
 every client detected on this machine and skips the rest; name a
 surface or a client to narrow it. list shows every supported client
-and what is installed. supported clients: claude (Claude Code).
+and what is installed. supported clients: claude (Claude Code), codex.
 
-Hooks are wired into ~/.claude/settings.json (with --project, the
-repo's personal .claude/settings.local.json) without disturbing
-anything else there; malformed JSON is never rewritten. The skill
-installs to ~/.claude/skills/jog/ (with --project, the repo's
-committable .claude/skills/). uninstall removes exactly what install
-wrote — and refuses to delete a skill file carrying local edits.
+Claude hooks are wired into ~/.claude/settings.json (with --project,
+the repo's personal .claude/settings.local.json); Codex hooks use
+~/.codex/hooks.json (with --project, .codex/hooks.json). Skills install
+to ~/.claude/skills/jog/ for Claude and ~/.agents/skills/jog/ for Codex;
+--project uses the corresponding committable repo directories. Existing
+JSON fields are preserved, malformed JSON is never rewritten, and
+uninstall refuses to delete a skill file carrying local edits.
 `
 
 // helpTexts is the per-command help behind `jog <cmd> --help` and
@@ -159,20 +161,21 @@ usage:
   jog doctor [--fix]
 
 Checks the engine (chains, snapshot identity, reflogs, gc config), the
-wiring (shell alias, Claude Code hooks and skill), and liveness (age of
+wiring (shell alias, agent hooks and skills), and liveness (age of
 the newest snapshot). Read-only by default; --fix repairs exactly the
 two gc config keys that keep git's gc off jog's history, and nothing
 else. Exits 0 when healthy, 1 with findings.
 `,
-	"hook": `jog hook claude — the Claude Code hook entry point
+	"hook": `jog hook claude|codex — agent hook entry points
 
 usage:
   jog hook claude    (Claude Code invokes this; JSON payload on stdin)
+  jog hook codex     (Codex invokes this; JSON payload on stdin)
 
 Snapshots before every prompt and tool call, and always exits 0 — a
 failing hook must never block the user's action. It also introduces jog
-to Claude once per session, one line of context. This is the command
-` + "`jog agents install`" + ` wires into Claude Code's settings; it is not
+to the agent once per session, one line of context. These are the commands
+` + "`jog agents install`" + ` wires into agent settings; they are not
 meant to be run by hand.
 `,
 	"agents": agentsHelp,
@@ -245,22 +248,27 @@ func run(args []string) int {
 	case "back":
 		return cli.Back(args[1:])
 	case "hook":
-		// Pure runtime entry (`jog hook claude`, JSON on stdin) — this is
-		// the exact command `jog agents install` wires into settings, so it
-		// exits 0 always, even on misconfiguration: a non-zero exit from a
+		// Pure runtime entries (`jog hook claude|codex`, JSON on stdin) are
+		// the exact commands `jog agents install` wires into settings, so they
+		// exit 0 always, even on misconfiguration: a non-zero exit from a
 		// hook blocks the user's tool call or prompt. Management lives
 		// under `jog agents`; humans reaching for it here get a pointer.
-		if len(args) == 2 && args[1] == "claude" {
-			return cli.HookClaude(os.Stdin, os.Stdout)
+		if len(args) == 2 {
+			switch args[1] {
+			case "claude":
+				return cli.HookClaude(os.Stdin, os.Stdout)
+			case "codex":
+				return cli.HookCodex(os.Stdin, os.Stdout)
+			}
 		}
 		if len(args) > 2 {
 			fmt.Fprintln(os.Stderr, "jog: hook management lives under `jog agents` — try `jog agents install`")
 			return 2
 		}
-		fmt.Fprintln(os.Stderr, "jog: unknown hook adapter (want: jog hook claude)")
+		fmt.Fprintln(os.Stderr, "jog: unknown hook adapter (want: jog hook claude or jog hook codex)")
 		return 0
 	case "agents", "agent":
-		return cli.Agents(args[1:])
+		return agents.Run(args[1:])
 	case "hooks", "skill", "skills":
 		fmt.Fprintf(os.Stderr, "jog: %q moved — `jog agents install|uninstall|list` manages hooks and skills\n", args[0])
 		return 2

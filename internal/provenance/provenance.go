@@ -32,17 +32,17 @@ func PreGit(gitArgs []string) string {
 	return Pre("git " + strings.Join(gitArgs, " "))
 }
 
-// Claude is a Claude Code hook snapshot: `claude[<sid[:8]>]: <detail>`.
-// The session prefix groups a session's snapshots in the timeline and pairs
-// them with Claude's own checkpoints for the /rewind complement.
-func Claude(sessionID, detail string) string {
-	src := "claude"
+// Agent is an agent-client hook snapshot: `<name>[<sid[:8]>]: <detail>`.
+// The session prefix groups a session's snapshots in the timeline and — for
+// Claude — pairs them with its own checkpoints for the /rewind complement.
+func Agent(name, sessionID, detail string) string {
+	src := name
 	if sessionID != "" {
 		id := []rune(sessionID)
 		if len(id) > sessionPrefix {
 			id = id[:sessionPrefix]
 		}
-		src = "claude[" + string(id) + "]"
+		src = name + "[" + string(id) + "]"
 	}
 	if detail == "" {
 		return src

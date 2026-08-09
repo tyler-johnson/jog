@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -9,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tyler-johnson/jog/internal/agents"
 	"github.com/tyler-johnson/jog/internal/gitx"
 	"github.com/tyler-johnson/jog/internal/snap"
 )
@@ -189,20 +189,22 @@ func (d *doctor) checkTriggers() {
 		return
 	}
 
-	// Wherever the user chose to wire — user scope or either of the
-	// project's settings files — doctor should find it.
+	// Wherever the user chose to wire — user or project scope — doctor
+	// should find it. Every registered client is checked, so a new client
+	// in internal/agents shows up here without doctor changing.
 	hooks := false
-	if loc := claudeHooksLocation(); loc != "" {
-		d.ok("claude hooks", "`jog hook claude` wired in "+loc)
-		hooks = true
-	} else {
-		d.info("claude hooks", "not wired (optional — `jog agents install`)")
-	}
-
-	if loc := claudeSkillLocation(); loc != "" {
-		d.ok("claude skill", "installed at "+loc)
-	} else {
-		d.info("claude skill", "not installed (optional — `jog agents install`)")
+	for _, s := range agents.Statuses() {
+		if s.HooksLocation != "" {
+			d.ok(s.Name+" hooks", "`jog hook "+s.Name+"` wired in "+s.HooksLocation)
+			hooks = true
+		} else {
+			d.info(s.Name+" hooks", "not wired (optional — `jog agents install`)")
+		}
+		if s.SkillLocation != "" {
+			d.ok(s.Name+" skill", "installed at "+s.SkillLocation)
+		} else {
+			d.info(s.Name+" skill", "not installed (optional — `jog agents install`)")
+		}
 	}
 
 	aliasFile := ""
@@ -222,41 +224,6 @@ func (d *doctor) checkTriggers() {
 	if !hooks && aliasFile == "" {
 		d.warn("triggers", "neither the alias nor agent hooks are wired — snapshots only happen when you run `jog` by hand (`jog agents install`, or add the alias)")
 	}
-}
-
-func fileExists(path string) bool {
-	_, err := os.Stat(path)
-	return err == nil
-}
-
-// claudeHooksWired reports whether any hook command in the settings file
-// invokes `jog hook claude`. Parsed defensively: the file is external
-// surface, and a malformed one simply reads as "not wired".
-func claudeHooksWired(path string) bool {
-	b, err := os.ReadFile(path)
-	if err != nil {
-		return false
-	}
-	var s struct {
-		Hooks map[string][]struct {
-			Hooks []struct {
-				Command string `json:"command"`
-			} `json:"hooks"`
-		} `json:"hooks"`
-	}
-	if json.Unmarshal(b, &s) != nil {
-		return false
-	}
-	for _, matchers := range s.Hooks {
-		for _, m := range matchers {
-			for _, h := range m.Hooks {
-				if strings.Contains(h.Command, "jog hook claude") {
-					return true
-				}
-			}
-		}
-	}
-	return false
 }
 
 func humanAge(d time.Duration) string {

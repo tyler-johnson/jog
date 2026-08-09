@@ -436,6 +436,17 @@ func TestHookAlwaysExitsZero(t *testing.T) {
 		t.Errorf("provenance = %q", got)
 	}
 
+	tr.Write("b.txt", "codex change\n")
+	codexJSON := `{"hook_event_name":"PreToolUse","session_id":"codex-session","cwd":` +
+		strconvQuote(tr.Dir) + `,"tool_name":"apply_patch","tool_input":{"command":"*** Begin Patch"}}`
+	stdout, _, code = runJogStdin(t, tr.Dir, codexJSON, "hook", "codex")
+	if code != 0 || stdout != "" {
+		t.Errorf("hook codex: code=%d stdout=%q (stdout must stay empty)", code, stdout)
+	}
+	if got := tr.Git("log", "-1", "--format=%s", "refs/jog/main"); got != "codex[codex-se]: apply_patch(*** Begin Patch)" {
+		t.Errorf("codex provenance = %q", got)
+	}
+
 	if _, _, code := runJogStdin(t, tr.Dir, "garbage", "hook", "claude"); code != 0 {
 		t.Errorf("hook claude with garbage stdin exited %d", code)
 	}
@@ -620,7 +631,7 @@ func TestDoctor(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(home, ".claude", "settings.json"), []byte(settings), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	env := []string{"HOME=" + home}
+	env := []string{"HOME=" + home, "PATH=/usr/bin:/bin"}
 
 	// Engine never run: the loudest finding doctor exists for.
 	tr := testrepo.New(t)
@@ -976,7 +987,7 @@ func TestAgents(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(home, ".claude"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	env := []string{"HOME=" + home}
+	env := []string{"HOME=" + home, "PATH=/usr/bin:/bin"}
 	dir := t.TempDir()
 	settings := filepath.Join(home, ".claude", "settings.json")
 	skillPath := filepath.Join(home, ".claude", "skills", "jog", "SKILL.md")
@@ -1056,19 +1067,113 @@ func TestAgents(t *testing.T) {
 		t.Errorf("list after uninstall:\n%s", stdout)
 	}
 
-	_, stderr, code = runJogEnv(t, dir, env, "agents", "install", "codex")
+	_, stderr, code = runJogEnv(t, dir, env, "agents", "install", "cursor")
 	if code != 2 || !strings.Contains(stderr, "supported") {
 		t.Errorf("unknown client: code=%d stderr=%q", code, stderr)
 	}
 
 	stdout, _, code = runJogEnv(t, dir, env, "agent", "list")
-	if code != 0 || !strings.Contains(stdout, "claude") {
+	if code != 0 || !strings.Contains(stdout, "claude") || !strings.Contains(stdout, "codex") {
 		t.Errorf("singular alias: code=%d\n%s", code, stdout)
 	}
 
 	_, stderr, code = runJogEnv(t, dir, env, "agents")
 	if code != 2 || !strings.Contains(stderr, "usage") {
 		t.Errorf("bare agents: code=%d stderr=%q", code, stderr)
+	}
+}
+
+// TestAgentsCodex covers Codex detection, its official user-level hook and
+// skill locations, idempotence, project-root anchoring, and clean removal.
+func TestAgentsCodex(t *testing.T) {
+	home := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(home, ".codex"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	env := []string{"HOME=" + home, "PATH=/usr/bin:/bin"}
+	dir := t.TempDir()
+	hooksPath := filepath.Join(home, ".codex", "hooks.json")
+	skillPath := filepath.Join(home, ".agents", "skills", "jog", "SKILL.md")
+
+	stdout, stderr, code := runJogEnv(t, dir, env, "agents", "install")
+	if code != 0 {
+		t.Fatalf("codex install: code=%d stderr=%s", code, stderr)
+	}
+	for _, want := range []string{"codex", "PreToolUse", "UserPromptSubmit", "/hooks", ".agents"} {
+		if !strings.Contains(stdout, want) {
+			t.Errorf("codex install output missing %q:\n%s", want, stdout)
+		}
+	}
+	if strings.Contains(stdout, "claude hooks") {
+		t.Errorf("undetected Claude was installed:\n%s", stdout)
+	}
+	b, err := os.ReadFile(hooksPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(b), "jog hook codex") || !strings.Contains(string(b), "Bash|Edit|Write") {
+		t.Errorf("unexpected Codex hooks:\n%s", b)
+	}
+	if sb, err := os.ReadFile(skillPath); err != nil {
+		t.Fatal(err)
+	} else if !strings.Contains(string(sb), "name: jog") {
+		t.Errorf("Codex skill missing frontmatter:\n%.120s", sb)
+	}
+
+	stdout, _, code = runJogEnv(t, dir, env, "agents", "install", "codex")
+	if code != 0 || !strings.Contains(stdout, "already wired") || !strings.Contains(stdout, "up to date") {
+		t.Errorf("codex reinstall: code=%d\n%s", code, stdout)
+	}
+	stdout, _, code = runJogEnv(t, dir, env, "agents", "list", "codex")
+	if code != 0 || !strings.Contains(stdout, "~/.codex/hooks.json") || !strings.Contains(stdout, "~/.agents/skills") {
+		t.Errorf("codex list after install: code=%d\n%s", code, stdout)
+	}
+
+	tr := testrepo.New(t)
+	tr.Write("a.txt", "x\n")
+	tr.Commit("base")
+	sub := filepath.Join(tr.Dir, "deep")
+	if err := os.MkdirAll(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	_, _, code = runJogEnv(t, sub, env, "agents", "install", "codex", "--project")
+	if code != 0 {
+		t.Fatalf("codex --project install: code=%d", code)
+	}
+	for _, path := range []string{
+		filepath.Join(tr.Dir, ".codex", "hooks.json"),
+		filepath.Join(tr.Dir, ".agents", "skills", "jog", "SKILL.md"),
+	} {
+		if _, err := os.Stat(path); err != nil {
+			t.Errorf("codex --project output missing at %s: %v", path, err)
+		}
+	}
+	runJog(t, tr.Dir, "-m", "codex doctor")
+	stdout, _, code = runJogEnv(t, tr.Dir, env, "doctor")
+	if code != 0 || !strings.Contains(stdout, "codex hooks") || !strings.Contains(stdout, "codex skill") {
+		t.Errorf("doctor did not recognize Codex integration: code=%d\n%s", code, stdout)
+	}
+
+	stdout, _, code = runJogEnv(t, dir, env, "agents", "uninstall", "codex")
+	if code != 0 || !strings.Contains(stdout, "removed 2") || !strings.Contains(stdout, "SKILL.md") {
+		t.Errorf("codex uninstall: code=%d\n%s", code, stdout)
+	}
+	if b, _ := os.ReadFile(hooksPath); strings.Contains(string(b), "jog hook codex") {
+		t.Errorf("Codex hooks survive uninstall:\n%s", b)
+	}
+	if _, err := os.Stat(skillPath); !os.IsNotExist(err) {
+		t.Error("Codex skill survives uninstall")
+	}
+
+	if err := os.WriteFile(hooksPath, []byte("{not json"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, stderr, code = runJogEnv(t, dir, env, "agents", "install", "hooks", "codex")
+	if code != 1 || !strings.Contains(stderr, "not valid JSON") {
+		t.Errorf("malformed Codex hooks: code=%d stderr=%q", code, stderr)
+	}
+	if b, _ := os.ReadFile(hooksPath); string(b) != "{not json" {
+		t.Error("malformed Codex hooks file was rewritten")
 	}
 }
 

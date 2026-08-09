@@ -1,4 +1,4 @@
-package cli
+package agents
 
 import (
 	"encoding/json"
@@ -11,109 +11,45 @@ import (
 	"github.com/tyler-johnson/jog/internal/gitx"
 )
 
-// Claude Code hook wiring — the client-specific half behind `jog agents`.
-// The command written into settings is the runtime entry `jog hook claude`
-// (see HookClaude); everything in this file only edits configuration.
+// Shared hook-wiring mechanics — everything here is client-agnostic;
+// per-client facts (events, paths) live in claude.go and codex.go. The
+// commands written into settings are runtime entries such as `jog hook
+// claude`; this file only edits configuration.
 
-// jogHookEvents is what install wires: the same two events the README
-// documents, covering every tool-call and prompt boundary.
-var jogHookEvents = []struct{ name, matcher string }{
-	{"PreToolUse", "Bash|Edit|Write|NotebookEdit"},
-	{"UserPromptSubmit", ""},
-}
-
-func claudeHooksInstall(project bool) (string, bool, error) {
-	path, err := claudeSettingsPath(project)
-	if err != nil {
-		return "", false, err
-	}
-	m, err := loadSettings(path)
-	if err != nil {
-		return "", false, err
-	}
-	cmd := hookCommand()
-	added, err := wireHooks(m, cmd)
-	if err != nil {
-		return "", false, err
-	}
-	if len(added) == 0 {
-		return "already wired in " + path, false, nil
-	}
-	if err := writeSettings(path, m); err != nil {
-		return "", false, err
-	}
-	return "wired " + strings.Join(added, " and ") + " in " + path + " (command: " + cmd + ")", true, nil
-}
-
-func claudeHooksUninstall(project bool) (string, bool, error) {
-	path, err := claudeSettingsPath(project)
-	if err != nil {
-		return "", false, err
-	}
-	if _, err := os.Stat(path); os.IsNotExist(err) {
-		return "no settings file at " + path + " — nothing to remove", false, nil
-	}
-	m, err := loadSettings(path)
-	if err != nil {
-		return "", false, err
-	}
-	removed := unwireHooks(m)
-	if removed == 0 {
-		return "no jog hooks in " + path + " — nothing to remove", false, nil
-	}
-	if err := writeSettings(path, m); err != nil {
-		return "", false, err
-	}
-	return fmt.Sprintf("removed %d jog hook(s) from %s — everything else untouched", removed, path), true, nil
-}
-
-// claudeHooksLocation reports where `jog hook claude` is wired — user
-// scope first, then the current repo's shared and personal settings — or
-// "" when it isn't.
-func claudeHooksLocation() string {
-	if home, err := os.UserHomeDir(); err == nil {
-		if claudeHooksWired(filepath.Join(home, ".claude", "settings.json")) {
-			return "~/.claude/settings.json"
-		}
-	}
-	if root, err := projectRoot(); err == nil {
-		for _, f := range []string{"settings.json", "settings.local.json"} {
-			if claudeHooksWired(filepath.Join(root, ".claude", f)) {
-				return ".claude/" + f + " (project)"
-			}
-		}
-	}
-	return ""
-}
+// hookEvent is one event install wires: its name and an optional tool
+// matcher.
+type hookEvent struct{ name, matcher string }
 
 // hookCommand picks how the hook invokes jog: the bare name when jog is on
 // PATH (survives upgrades and relocations), otherwise this binary's
 // absolute path as a fallback that at least works today.
-func hookCommand() string {
+func hookCommand(client string) string {
 	if _, err := exec.LookPath("jog"); err == nil {
-		return "jog hook claude"
+		return "jog hook " + client
 	}
 	if exe, err := os.Executable(); err == nil {
-		return exe + " hook claude"
+		return exe + " hook " + client
 	}
-	return "jog hook claude"
+	return "jog hook " + client
 }
 
-// claudeSettingsPath resolves the settings file for the scope. Project
-// scope anchors at the repo toplevel when inside one, else the cwd.
-func claudeSettingsPath(project bool) (string, error) {
-	if !project {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return "", fmt.Errorf("cannot resolve home directory: %w", err)
-		}
-		return filepath.Join(home, ".claude", "settings.json"), nil
+// homePath joins elems under the home directory.
+func homePath(elems ...string) (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("cannot resolve home directory: %w", err)
 	}
+	return filepath.Join(append([]string{home}, elems...)...), nil
+}
+
+// repoPath joins elems under the project root: the repo toplevel when
+// inside one, else the cwd.
+func repoPath(elems ...string) (string, error) {
 	root, err := projectRoot()
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(root, ".claude", "settings.local.json"), nil
+	return filepath.Join(append([]string{root}, elems...)...), nil
 }
 
 func projectRoot() (string, error) {
@@ -129,7 +65,28 @@ func projectRoot() (string, error) {
 	return wd, nil
 }
 
-// loadSettings parses a Claude Code settings file into a generic map so
+// tildePath renders a home-anchored absolute path as ~/… for display.
+func tildePath(p string) string {
+	if home, err := os.UserHomeDir(); err == nil {
+		if rel, err := filepath.Rel(home, p); err == nil && !strings.HasPrefix(rel, "..") {
+			return "~/" + filepath.ToSlash(rel)
+		}
+	}
+	return p
+}
+
+// projectPathDisplay renders a path inside the project root relative,
+// tagged as project scope.
+func projectPathDisplay(p string) string {
+	if root, err := projectRoot(); err == nil {
+		if rel, err := filepath.Rel(root, p); err == nil && !strings.HasPrefix(rel, "..") {
+			return filepath.ToSlash(rel) + " (project)"
+		}
+	}
+	return p
+}
+
+// loadSettings parses an agent JSON configuration file into a generic map so
 // every field jog doesn't understand round-trips untouched. A missing file
 // is an empty map; malformed JSON is a hard error — never rewrite a file
 // that can't be read back faithfully.
@@ -163,9 +120,9 @@ func writeSettings(path string, m map[string]any) error {
 }
 
 // wireHooks adds the jog hook entries that are missing and reports which
-// events it added. An event already invoking `jog hook claude` — however
-// the user shaped it — is left exactly alone.
-func wireHooks(m map[string]any, cmd string) ([]string, error) {
+// events it added. An event already invoking this client's adapter —
+// however the user shaped it — is left exactly alone.
+func wireHooks(m map[string]any, cmd, client string, events []hookEvent) ([]string, error) {
 	var hooks map[string]any
 	switch h := m["hooks"].(type) {
 	case nil:
@@ -178,8 +135,8 @@ func wireHooks(m map[string]any, cmd string) ([]string, error) {
 	}
 
 	var added []string
-	for _, ev := range jogHookEvents {
-		if eventInvokesJog(hooks[ev.name]) {
+	for _, ev := range events {
+		if eventInvokesJog(hooks[ev.name], cmd, client) {
 			continue
 		}
 		entry := map[string]any{
@@ -198,14 +155,17 @@ func wireHooks(m map[string]any, cmd string) ([]string, error) {
 	return added, nil
 }
 
-func eventInvokesJog(v any) bool {
+// eventInvokesJog recognizes both the exact command chosen for this
+// install (which may be an absolute path to a differently-named binary)
+// and any user-authored jog command for the adapter.
+func eventInvokesJog(v any, cmd, client string) bool {
 	groups, _ := v.([]any)
 	for _, g := range groups {
 		gm, _ := g.(map[string]any)
 		entries, _ := gm["hooks"].([]any)
 		for _, e := range entries {
 			em, _ := e.(map[string]any)
-			if c, _ := em["command"].(string); strings.Contains(c, "jog hook claude") {
+			if c, _ := em["command"].(string); c == cmd || strings.Contains(c, "jog hook "+client) {
 				return true
 			}
 		}
@@ -213,11 +173,11 @@ func eventInvokesJog(v any) bool {
 	return false
 }
 
-// unwireHooks removes every hook entry whose command invokes `jog hook
-// claude`, wherever the user put it, then prunes the structures that
+// unwireHooks removes every hook entry whose command invokes the requested
+// adapter, wherever the user put it, then prunes the structures that
 // emptied out. Everything else — other hooks in the same matcher group,
 // unrelated events, unknown fields — survives byte-for-byte in value terms.
-func unwireHooks(m map[string]any) int {
+func unwireHooks(m map[string]any, client string) int {
 	hooks, _ := m["hooks"].(map[string]any)
 	if hooks == nil {
 		return 0
@@ -240,7 +200,7 @@ func unwireHooks(m map[string]any) int {
 			removedHere := 0
 			for _, e := range entries {
 				em, _ := e.(map[string]any)
-				if c, _ := em["command"].(string); em != nil && strings.Contains(c, "jog hook claude") {
+				if c, _ := em["command"].(string); em != nil && strings.Contains(c, "jog hook "+client) {
 					removed++
 					removedHere++
 					continue
@@ -267,4 +227,34 @@ func unwireHooks(m map[string]any) int {
 		delete(m, "hooks")
 	}
 	return removed
+}
+
+// hooksFileWired parses a client's JSON hook file defensively, reporting
+// whether any command invokes the client's jog adapter. A malformed
+// external file simply reads as "not wired".
+func hooksFileWired(path, client string) bool {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return false
+	}
+	var s struct {
+		Hooks map[string][]struct {
+			Hooks []struct {
+				Command string `json:"command"`
+			} `json:"hooks"`
+		} `json:"hooks"`
+	}
+	if json.Unmarshal(b, &s) != nil {
+		return false
+	}
+	for _, matchers := range s.Hooks {
+		for _, matcher := range matchers {
+			for _, hook := range matcher.Hooks {
+				if strings.Contains(hook.Command, "jog hook "+client) {
+					return true
+				}
+			}
+		}
+	}
+	return false
 }

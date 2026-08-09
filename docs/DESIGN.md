@@ -47,11 +47,11 @@ for ignored/build artifacts.
 One Go binary. Two write paths in, several read paths out:
 
 ```
-  Claude Code hooks ─┐
-  git alias (you) ───┼──►  jog snap engine ──► refs/jog/<branch> in .git
-  manual `jog` ──────┘                            │
-                                                  ├─► jog snaps / since / back / pick
-                                                  └─► jog mcp  (agent read access)
+  agent hooks ─────┐
+  git alias (you) ─┼──►  jog snap engine ──► refs/jog/<branch> in .git
+  manual `jog` ────┘                            │
+                                                ├─► jog snaps / since / back / pick
+                                                └─► jog mcp  (agent read access)
 ```
 
 - **Language:** Go. Single static binary, brew-distributable, Bubble Tea for
@@ -181,7 +181,7 @@ jog back <path> [--at T]  # restore one file      (T: git reflog time syntax or 
 jog back --all --at T     # restore whole tree, including deletions
 jog pick <path> [--all]   # fzf/TUI scrub through versions (--all: across every chain)
 jog trim                  # apply retention policy + gc
-jog hook claude           # Claude Code hook entry point (reads hook JSON on stdin)
+jog hook claude|codex     # agent hook entry points (read hook JSON on stdin)
 jog mcp                   # MCP server over the read paths
 jog doctor                # verify invariants, config, liveness
 ```
@@ -221,7 +221,7 @@ alias git=jog
 
 ## 6. Triggers
 
-### Claude Code hooks (primary)
+### Agent hooks (primary)
 
 User-level `~/.claude/settings.json` — covers every repo, zero per-repo setup;
 binary no-ops in ms outside git repos:
@@ -245,6 +245,12 @@ session_id) into provenance. Rules: always exit 0; never block; per-tool-call
 frequency is fine (no-op path is ~25 ms; only tree-changing calls mint
 objects). `UserPromptSubmit` aligns jog snapshots with Claude's own checkpoint
 boundaries — `/rewind` the conversation, `jog back --all` the world.
+
+Codex uses the same event boundaries through `~/.codex/hooks.json`, with
+`Bash|Edit|Write` matching shell commands and the `apply_patch` aliases, and
+invokes `jog hook codex`. Non-managed Codex hooks must be reviewed with
+`/hooks` before they run. At project scope Codex uses `.codex/hooks.json`;
+its recovery skill is discovered from `.agents/skills/jog/SKILL.md`.
 
 ### git alias (secondary — the human) and `jog` bare (deliberate checkpoints)
 

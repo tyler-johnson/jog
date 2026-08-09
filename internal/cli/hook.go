@@ -13,7 +13,7 @@ import (
 	"github.com/tyler-johnson/jog/internal/snap"
 )
 
-// hookPayload is the JSON Claude Code writes to a hook's stdin. Parsed
+// hookPayload is the JSON an agent client writes to a hook's stdin. Parsed
 // defensively: unknown fields ignored, missing fields degrade to generic
 // provenance — the payload is external surface that may drift.
 type hookPayload struct {
@@ -37,6 +37,16 @@ type hookPayload struct {
 // is not injected, so those events stay silent). jog uses that channel for
 // exactly one line per session — see sessionNotice.
 func HookClaude(stdin io.Reader, stdout io.Writer) int {
+	return hookAgent("claude", stdin, stdout)
+}
+
+// HookCodex handles `jog hook codex` using Codex's PreToolUse and
+// UserPromptSubmit payloads. Like the Claude adapter, it always exits 0.
+func HookCodex(stdin io.Reader, stdout io.Writer) int {
+	return hookAgent("codex", stdin, stdout)
+}
+
+func hookAgent(client string, stdin io.Reader, stdout io.Writer) int {
 	data, err := io.ReadAll(io.LimitReader(stdin, 8<<20))
 	if err != nil {
 		return hookDone("read stdin", err)
@@ -56,30 +66,30 @@ func HookClaude(stdin io.Reader, stdout io.Writer) int {
 	if err != nil {
 		return hookDone("discover", err) // outside a repo: the common, silent case
 	}
-	res, err := snap.Take(repo, provenance.Claude(p.SessionID, hookDetail(&p)))
+	res, err := snap.Take(repo, provenance.Agent(client, p.SessionID, hookDetail(&p)))
 	if err != nil {
 		return hookDone("snapshot", err)
 	}
 	debugf("hook: %+v", res)
 	if p.HookEventName == "UserPromptSubmit" && p.SessionID != "" {
-		sessionNotice(repo, p.SessionID, stdout)
+		sessionNotice(repo, client, p.SessionID, stdout)
 	}
 	return 0
 }
 
-// sessionNotice tells Claude, once per session per repo, that jog's safety
+// sessionNotice tells an agent, once per session per repo, that jog's safety
 // net is live and how to use it. Once is the whole design: repeated every
 // prompt it becomes noise the model learns to ignore, so the marker file
 // must be durably written before anything is emitted — on any doubt
 // (no session id, unwritable marker) we stay silent rather than risk
 // spamming every prompt.
-const claudeNotice = "[jog] This repo's uncommitted work is snapshotted before every prompt and tool call. " +
+const agentNotice = "[jog] This repo's uncommitted work is snapshotted before every prompt and tool call. " +
 	"If a file is lost or overwritten, run `jog snaps <path>` to list its saved versions and " +
 	"`jog back <path> --at <id>` to restore it — check before concluding work is gone. " +
 	"Before a risky operation, `jog -m \"msg\"` takes a labeled checkpoint."
 
-func sessionNotice(repo *gitx.Repo, session string, w io.Writer) {
-	marker := filepath.Join(repo.GitDir, "jog", "claude-session")
+func sessionNotice(repo *gitx.Repo, client, session string, w io.Writer) {
+	marker := filepath.Join(repo.GitDir, "jog", client+"-session")
 	if b, err := os.ReadFile(marker); err == nil && strings.TrimSpace(string(b)) == session {
 		return
 	}
@@ -89,7 +99,7 @@ func sessionNotice(repo *gitx.Repo, session string, w io.Writer) {
 	if err := os.WriteFile(marker, []byte(session+"\n"), 0o644); err != nil {
 		return
 	}
-	fmt.Fprintln(w, claudeNotice)
+	fmt.Fprintln(w, agentNotice)
 }
 
 // hookDetail renders the payload into the provenance detail. Formats from
@@ -106,6 +116,11 @@ func hookDetail(p *hookPayload) string {
 		switch p.ToolName {
 		case "Bash":
 			return "Bash(" + provenance.Truncate(str("command"), 64) + ")"
+		case "apply_patch":
+			if c := str("command"); c != "" {
+				return "apply_patch(" + provenance.Truncate(c, 64) + ")"
+			}
+			return "apply_patch" // input shape drifted — no empty parens
 		case "Edit", "Write":
 			return p.ToolName + "(" + relPath(p.Cwd, str("file_path")) + ")"
 		case "NotebookEdit":

@@ -51,8 +51,8 @@ Pick the pitch that fits how you work:
   only ordering that protects against `reset --hard` and `checkout -f`. No
   daemon, no filesystem watcher, no git hooks to install or break.
 - Three triggers: the shell alias (every git command you type), Claude Code
-  hooks (every prompt and tool call), and `jog` itself (deliberate
-  checkpoints). A no-op snapshot costs a few tens of milliseconds.
+  or Codex hooks (every prompt and mutating tool call), and `jog` itself
+  (deliberate checkpoints). A no-op snapshot costs a few tens of milliseconds.
 - jog never reimplements a git verb, and never touches your index, HEAD,
   branches, or config. If jog vanished tomorrow, stock git reads every
   snapshot ([see below](#no-lock-in)).
@@ -100,7 +100,7 @@ jog agents install   # hooks + skill for every agent client on this machine
 
 One command, two surfaces per client: hooks (snapshot before every prompt
 and tool call) and a skill (teaches the agent the recovery workflow).
-`jog agents list` shows every supported client — Claude Code today — and
+`jog agents list` shows every supported client — Claude Code and Codex — and
 what's installed; clients not found on the machine are skipped.
 
 For Claude Code, the hooks land in user-level `~/.claude/settings.json` —
@@ -122,20 +122,25 @@ yourself if you prefer):
 }
 ```
 
+For Codex, install writes the equivalent events to `~/.codex/hooks.json`
+using the `jog hook codex` adapter and installs the skill at
+`~/.agents/skills/jog/SKILL.md`. Codex requires non-managed hooks to be
+reviewed before they run; open `/hooks` after installation and trust the
+jog entries.
+
 (If jog isn't on PATH for non-interactive shells, install writes the
 absolute path instead — and tells you so.)
 
-`--project` scopes the command to the current repo: hooks go to the
-personal `.claude/settings.local.json` (a committed hook command would
-break for teammates without jog), the skill to the committable
-`.claude/skills/`. `jog agents uninstall` removes exactly what install
-wrote and touches nothing else.
+`--project` scopes the command to the current repo. Claude hooks go to the
+personal `.claude/settings.local.json` and its skill to `.claude/skills/`.
+Codex uses the committable `.codex/hooks.json` and `.agents/skills/`; each
+Codex user must review project hooks with `/hooks`. `jog agents uninstall`
+removes exactly what install wrote and touches nothing else.
 
-Once the hooks are wired, jog introduces itself to Claude once per session
+Once the hooks are wired, jog introduces itself to the agent once per session
 — a single line of context saying snapshots are live and how to restore —
-so the agent knows the safety net exists exactly when it's active. The
-skill (`~/.claude/skills/jog/SKILL.md`) goes further and teaches the full
-recovery workflow.
+so it knows the safety net exists exactly when it's active. Each client's
+installed skill goes further and teaches the full recovery workflow.
 
 **4. Verify:** make any change in a repo, run `git status`, then `jog snaps`
 — you should see a `pre: git status` entry.
@@ -302,8 +307,8 @@ Native `git config` keys — global or per-repo, no new file format:
 ## Roadmap
 
 - **shipped:** snapshot engine, `snaps` (+ `--all` forest view), `since`,
-  `back`, `pick`, `trim` + tapering retention, `doctor`, Claude Code
-  integration (hooks, agent skill, once-per-session notice), brew tap.
+  `back`, `pick`, `trim` + tapering retention, `doctor`, Claude Code and
+  Codex integration (hooks, agent skills, once-per-session notice), brew tap.
 - **next:** automatic trim (piggybacked, at most daily — after the manual
   command has earned trust), MCP server (agents query their own snapshot
   history), optional encrypted backup push of `refs/jog/*` to a private
