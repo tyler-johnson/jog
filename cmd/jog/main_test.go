@@ -1795,3 +1795,74 @@ func TestEditorHookEndToEnd(t *testing.T) {
 		t.Errorf("bare editor-hook: code=%d, want 0", code)
 	}
 }
+
+// TestEditorsVSCode: the extension lands in every root a VS Code on this
+// machine reads — the desktop dir, and the Remote-SSH server dir when it
+// exists (a remote window's extension host loads only from the latter).
+func TestEditorsVSCode(t *testing.T) {
+	home := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(home, ".vscode-server"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	env := []string{"HOME=" + home, "XDG_CONFIG_HOME=", "PATH=/usr/bin:/bin"}
+	dir := t.TempDir()
+	desktop := filepath.Join(home, ".vscode", "extensions", "jog.jog-0.0.1")
+	server := filepath.Join(home, ".vscode-server", "extensions", "jog.jog-0.0.1")
+
+	// Only the server root exists: desktop is not invented.
+	stdout, stderr, code := runJogEnv(t, dir, env, "editors", "install", "vscode")
+	if code != 0 {
+		t.Fatalf("install: code=%d stderr=%s", code, stderr)
+	}
+	if _, err := os.Stat(filepath.Join(server, "extension.js")); err != nil {
+		t.Errorf("server extension missing: %v", err)
+	}
+	if _, err := os.Stat(desktop); !os.IsNotExist(err) {
+		t.Errorf("desktop root invented despite ~/.vscode not existing")
+	}
+	if !strings.Contains(stdout, "Remote-SSH covered") {
+		t.Errorf("install notes missing the remote story:\n%s", stdout)
+	}
+
+	// Desktop appears (say, the app got installed): both roots covered.
+	if err := os.MkdirAll(filepath.Join(home, ".vscode"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	_, _, code = runJogEnv(t, dir, env, "editors", "install", "vscode")
+	if code != 0 {
+		t.Fatalf("second install: code=%d", code)
+	}
+	if _, err := os.Stat(filepath.Join(desktop, "extension.js")); err != nil {
+		t.Errorf("desktop extension missing after root appeared: %v", err)
+	}
+
+	// A foreign-machine rendering (VS Code's install-on-remote copies the
+	// other machine's baked path) is still jog's to overwrite and remove.
+	if err := os.WriteFile(filepath.Join(server, "extension.js"),
+		bytes.Replace(mustRead(t, filepath.Join(desktop, "extension.js")), []byte(`"`+jogBin+`"`), []byte(`"/opt/homebrew/bin/jog"`), 1), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	stdout, _, code = runJogEnv(t, dir, env, "editors", "install", "vscode")
+	if code != 0 || !strings.Contains(stdout, "updated — "+server) {
+		t.Errorf("foreign rendering not updated: code=%d\n%s", code, stdout)
+	}
+
+	stdout, _, code = runJogEnv(t, dir, env, "editors", "uninstall", "vscode")
+	if code != 0 || !strings.Contains(stdout, "removed") {
+		t.Errorf("uninstall: code=%d\n%s", code, stdout)
+	}
+	for _, d := range []string{desktop, server} {
+		if _, err := os.Stat(d); !os.IsNotExist(err) {
+			t.Errorf("%s survived uninstall", d)
+		}
+	}
+}
+
+func mustRead(t *testing.T, path string) []byte {
+	t.Helper()
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return b
+}

@@ -178,7 +178,7 @@ checkpoint (the pre-save state is your editor's own undo).
 | `sublime` | `Packages/User/jog.py` (per-OS path) | immediately |
 | `kakoune` | `~/.config/kak/` (autoload, or sourced from kakrc) | new sessions |
 | `micro` | `~/.config/micro/plug/jog/jog.lua` | new sessions |
-| `vscode` | `~/.vscode/extensions/jog.jog-0.0.1/` | after a full restart |
+| `vscode` | `~/.vscode/extensions/` + `~/.vscode-server/extensions/` (whichever exist) | after a full restart (remote windows: reload) |
 | `jetbrains` | `.idea/watcherTasks.xml` — per project | after a project reload; needs the File Watchers plugin |
 
 ```sh
@@ -198,7 +198,9 @@ project's `.idea` directory: re-run it in each project you want covered.
 > milliseconds outside git repos. Uninstall refuses to delete a hook file
 > carrying local edits. GUI editors get jog's absolute path baked in
 > (desktop launches don't inherit your shell's PATH); re-run install if
-> you move jog.
+> you move jog. For VS Code Remote-SSH, run the install on the remote
+> machine — its extension host loads from `~/.vscode-server`, and the
+> "Install in SSH" button copies your local machine's jog path.
 
 ## Usage
 
