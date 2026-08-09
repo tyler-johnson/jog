@@ -8,7 +8,8 @@ package agents
 // its tool boundary BeforeTool, with regex matchers over Gemini's
 // snake_case tool names.
 var geminiAgent = client{
-	name: "gemini",
+	name:  "gemini",
+	title: "Gemini CLI",
 	hookEvents: []hookEvent{
 		{"BeforeAgent", "*"},
 		{"BeforeTool", "write_file|replace|run_shell_command"},

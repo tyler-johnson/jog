@@ -16,6 +16,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"github.com/charmbracelet/lipgloss"
 )
 
 // client declares one supported agent client: its hook events, where each
@@ -27,6 +29,7 @@ import (
 // override hooksInstall/hooksUninstall/hooksLocation wholesale.
 type client struct {
 	name           string
+	title          string      // display name for list output
 	detect         func() bool // nil: binary `name` on PATH, or ~/.<name> exists
 	hookEvents     []hookEvent
 	hookExtras     map[string]any // extra fields each written hook entry carries
@@ -251,28 +254,38 @@ func row(client, surface, msg string) {
 	fmt.Printf("  %-8s %-6s %s\n", client, surface, msg)
 }
 
+// list groups output per client: a title line, then one line per
+// requested surface. Clients with no binary, no config, and no jog
+// integration collapse to a single quiet line — their absence is
+// unremarkable. lipgloss drops the styling on non-TTY output.
 func list(targets []client, hooks, skill bool) int {
-	for _, c := range targets {
-		found := c.detected()
+	var (
+		title = lipgloss.NewStyle().Bold(true)
+		good  = lipgloss.NewStyle().Foreground(lipgloss.Color("2"))
+		dim   = lipgloss.NewStyle().Faint(true)
+	)
+	surface := func(name, loc string) {
+		if loc != "" {
+			fmt.Printf("  %-6s %s  %s\n", name, good.Render("✓ installed"), loc)
+		} else {
+			fmt.Printf("  %-6s %s\n", name, dim.Render("· not installed"))
+		}
+	}
+	for i, c := range targets {
+		if i > 0 {
+			fmt.Println()
+		}
+		fmt.Println(title.Render(c.name) + dim.Render(" — "+c.title))
+		hooksLoc, skillLoc := c.whereHooks(), c.skillLocation()
+		if !c.detected() && hooksLoc == "" && skillLoc == "" {
+			fmt.Println(dim.Render("  not found on this machine — `jog agents install " + c.name + "` forces it"))
+			continue
+		}
 		if hooks {
-			switch loc := c.whereHooks(); {
-			case loc != "":
-				row(c.name, "hooks", "installed — "+loc)
-			case !found:
-				row(c.name, "hooks", "client not found — install skips it")
-			default:
-				row(c.name, "hooks", "not installed")
-			}
+			surface("hooks", hooksLoc)
 		}
 		if skill {
-			switch loc := c.skillLocation(); {
-			case loc != "":
-				row(c.name, "skill", "installed — "+loc)
-			case !found:
-				row(c.name, "skill", "client not found — install skips it")
-			default:
-				row(c.name, "skill", "not installed")
-			}
+			surface("skill", skillLoc)
 		}
 	}
 	return 0

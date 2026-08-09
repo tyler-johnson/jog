@@ -10,7 +10,8 @@ package agents
 // user and project scope — are committable; each Codex user reviews
 // project hooks with /hooks.
 var codexAgent = client{
-	name: "codex",
+	name:  "codex",
+	title: "Codex",
 	hookEvents: []hookEvent{
 		{"PreToolUse", "Bash|Edit|Write"},
 		{"UserPromptSubmit", ""},

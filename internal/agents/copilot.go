@@ -14,7 +14,8 @@ package agents
 // .github/copilot/settings.local.json, the skill to the committable
 // .github/skills/.
 var copilotAgent = client{
-	name: "copilot",
+	name:  "copilot",
+	title: "Copilot CLI",
 	hookEvents: []hookEvent{
 		{"PreToolUse", "Bash|Edit|Write"},
 		{"UserPromptSubmit", ""},

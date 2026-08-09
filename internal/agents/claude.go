@@ -10,7 +10,8 @@ import "path/filepath"
 // skill goes to the committable .claude/skills/, where it is inert without
 // jog installed.
 var claudeAgent = client{
-	name: "claude",
+	name:  "claude",
+	title: "Claude Code",
 	hookEvents: []hookEvent{
 		{"PreToolUse", "Bash|Edit|Write|NotebookEdit"},
 		{"UserPromptSubmit", ""},

@@ -20,6 +20,7 @@ import (
 // Cursor fails open on empty output, so jog can never block the action.
 var cursorAgent = client{
 	name:           "cursor",
+	title:          "Cursor",
 	hooksPath:      cursorHooksPath,
 	hooksInstall:   cursorHooksInstall,
 	hooksUninstall: cursorHooksUninstall,

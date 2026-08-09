@@ -22,7 +22,8 @@ import (
 var opencodePlugin []byte
 
 var opencodeAgent = client{
-	name: "opencode",
+	name:  "opencode",
+	title: "OpenCode",
 	detect: func() bool {
 		if _, err := exec.LookPath("opencode"); err == nil {
 			return true
