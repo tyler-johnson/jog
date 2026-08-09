@@ -24,11 +24,6 @@ restored to c0ffee1 (2 minutes ago — pre: git status): 14 restored, 0 deleted
 (undo: jog restore --all)
 ```
 
-On a terminal, `jog log` opens the timeline as an interactive browser —
-scrub with a live diff preview, enter reads the diff, `r` restores the
-tree after a y/n confirm. Short windows (a phone SSH session) show one
-frame at a time. Piped, it prints the plain list shown above.
-
 - [Why jog](#why-jog)
 - [Install](#install)
 - [Agents](#agents)
