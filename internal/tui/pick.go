@@ -39,6 +39,11 @@ var (
 // no pgup/pgdn or fn-layer keys required (they still scroll the preview
 // for keyboards that have them).
 //
+// On short windows (SSH from a phone) the frames become separate
+// full-screen views instead of a split — the same keys, but only the
+// focused frame is drawn, and the diff view is headed by the selected
+// row instead of the title.
+//
 // confirm, when non-empty, makes r ask before choosing: it is a fmt
 // template whose single %s receives the highlighted item's short id
 // (e.g. "restore the whole tree to %s? y/n"); y chooses, anything else
@@ -151,7 +156,7 @@ func (m *pickModel) View() string {
 		if i == m.cursor {
 			prefix = "> "
 		}
-		line := ansi.Truncate(prefix+m.items[i].Label, inner, "…")
+		line := ansi.Truncate(strings.ReplaceAll(prefix+m.items[i].Label, "\t", " "), inner, "…")
 		if i == m.cursor {
 			line = "\x1b[7m" + line + strings.Repeat(" ", max(0, inner-ansi.StringWidth(line))) + "\x1b[0m"
 		}
@@ -167,32 +172,67 @@ func (m *pickModel) View() string {
 		prev = append(prev, ansi.Truncate(l, inner, "…")+"\x1b[0m")
 	}
 
+	// Compact wording on narrow paged screens; hard-truncated either way
+	// so a long footer can never wrap and push the layout off by a row.
+	keysDiff, keysList := "↑↓ scroll · esc back to list", "↑↓ move · enter read diff"
+	if m.paged() {
+		keysDiff, keysList = "↑↓ · esc list", "↑↓ · enter diff"
+	}
+	// Truncate BEFORE styling: cutting a styled string can drop its ANSI
+	// reset and bleed the style into every line below.
+	var footer string
+	switch {
+	case m.confirming:
+		footer = styleAsk.Render(ansi.Truncate(fmt.Sprintf(m.confirm, shortID(m.items[m.cursor].ID)), m.width, "…"))
+	case m.focusDiff:
+		footer = styleFooter.Render(ansi.Truncate(fmt.Sprintf("%d/%d  %s · r restore · q quit", m.cursor+1, len(m.items), keysDiff), m.width, "…"))
+	default:
+		footer = styleFooter.Render(ansi.Truncate(fmt.Sprintf("%d/%d  %s · r restore · q quit", m.cursor+1, len(m.items), keysList), m.width, "…"))
+	}
+
+	title := styleTitle.Render(ansi.Truncate(m.title, m.width, "…"))
+
+	// Short window: one frame at a time, full screen. The diff view is
+	// headed by the selected row so it stands on its own.
+	if m.paged() {
+		if m.focusDiff {
+			header := styleTitle.Render(ansi.Truncate(strings.ReplaceAll(m.items[m.cursor].Label, "\t", " "), m.width, "…"))
+			return header + "\n" +
+				boxFocused.Width(inner).Height(previewH).Render(strings.Join(prev, "\n")) + "\n" +
+				footer
+		}
+		return title + "\n" +
+			boxFocused.Width(inner).Height(listH).Render(strings.Join(list, "\n")) + "\n" +
+			footer
+	}
+
 	listBox, prevBox := boxFocused, boxBlurred
 	if m.focusDiff {
 		listBox, prevBox = boxBlurred, boxFocused
 	}
-
-	var footer string
-	switch {
-	case m.confirming:
-		footer = styleAsk.Render(fmt.Sprintf(m.confirm, shortID(m.items[m.cursor].ID)))
-	case m.focusDiff:
-		footer = styleFooter.Render(fmt.Sprintf("%d/%d  ↑↓ scroll · esc back to list · r restore · q quit", m.cursor+1, len(m.items)))
-	default:
-		footer = styleFooter.Render(fmt.Sprintf("%d/%d  ↑↓ move · enter read diff · r restore · q quit", m.cursor+1, len(m.items)))
-	}
-
-	return ansi.Truncate(styleTitle.Render(m.title), m.width, "…") + "\n" +
+	return title + "\n" +
 		listBox.Width(inner).Height(listH).Render(strings.Join(list, "\n")) + "\n" +
 		prevBox.Width(inner).Height(previewH).Render(strings.Join(prev, "\n")) + "\n" +
 		footer
 }
 
+// paged reports whether the window is too short for the split layout —
+// below the threshold each frame gets the whole screen instead. 24 rows
+// is the classic full-size terminal: anything shorter (phone SSH, a
+// squeezed pane) reads better one frame at a time.
+func (m *pickModel) paged() bool {
+	return m.height < 24
+}
+
 // layout splits the window: one line each for title and footer, two border
 // rows per box, and the rest is content — the list gets ~30% of it (never
 // more rows than items), the preview fills the remainder, so the two boxes
-// always fill the window together.
+// always fill the window together. Paged, the visible frame gets all of it.
 func (m *pickModel) layout() (listH, previewH int) {
+	if m.paged() {
+		h := max(1, m.height-4)
+		return h, h
+	}
 	budget := max(2, m.height-6)
 	listH = min(len(m.items), max(3, budget*3/10))
 	listH = max(1, min(listH, budget-1))
@@ -201,11 +241,16 @@ func (m *pickModel) layout() (listH, previewH int) {
 }
 
 // previewLines fetches (and caches) the preview under the cursor, split
-// into lines — the unit both rendering and scroll clamping work in.
+// into lines — the unit both rendering and scroll clamping work in. Tabs
+// are expanded here: the terminal renders \t as a jump to the next 8-wide
+// stop, so a tab that survives to the screen makes the line wider than
+// the width math says, the line wraps, and every row below it is drawn
+// one row off until the next full repaint.
 func (m *pickModel) previewLines() []string {
 	p, ok := m.cache[m.cursor]
 	if !ok {
-		p = m.preview(m.items[m.cursor].ID)
+		// \r would send the cursor to column 0 mid-line (CRLF files).
+		p = strings.NewReplacer("\t", "    ", "\r", "").Replace(m.preview(m.items[m.cursor].ID))
 		m.cache[m.cursor] = p
 	}
 	return strings.Split(p, "\n")

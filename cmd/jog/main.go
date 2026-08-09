@@ -78,7 +78,8 @@ at a time: ↑/↓ (or j/k) move the list, enter focuses the diff so ↑/↓
 scroll it, esc returns to the list. From either frame, r restores the
 tree to the selected snapshot after a y/n confirmation, and q leaves
 everything untouched. Restores go through jog restore, so they are
-snapshotted first and undoable.
+snapshotted first and undoable. On short windows (a phone SSH session)
+the frames show one at a time with the same keys.
 
 Provenance names the command a snapshot ran ahead of — "pre: git status",
 "claude[…]: Bash(…)", "manual: msg" — never who made the changes.
