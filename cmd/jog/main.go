@@ -28,9 +28,8 @@ usage:
   jog since [T] [path]      what changed since a snapshot (default: last command boundary)
   jog back <path> [--at T]  restore one file from a snapshot
   jog back --all --at T     restore the whole working tree
+  jog agents install        hooks + skill for every agent client on this machine (uninstall, list; --project)
   jog hook claude           Claude Code hook entry point (reads JSON on stdin)
-  jog hook claude install   wire the hooks into Claude Code settings (uninstall removes; --project: this repo)
-  jog skill claude install  install the Claude Code skill (uninstall, --print; --project: this repo)
   jog git <args>            snapshot, then run the real git command
   jog pick [--all] <path>   scrub through a file's versions and restore one
   jog trim [--dry-run]      apply the retention taper; drop thinned snapshots
@@ -43,6 +42,28 @@ reserved for future releases: mcp
 
 Install the alias so every git command snapshots first:
   alias git='jog git'
+`
+
+const agentsHelp = `jog agents — agent client integrations
+
+usage:
+  jog agents install [hooks|skill] [client…] [--project]
+  jog agents uninstall [hooks|skill] [client…] [--project]
+  jog agents list
+
+Two surfaces per client: hooks (snapshot before every prompt and tool
+call) and a skill (teaches the agent the recovery workflow — find
+versions, restore, checkpoint before risk). install covers both for
+every client detected on this machine and skips the rest; name a
+surface or a client to narrow it. list shows every supported client
+and what is installed. supported clients: claude (Claude Code).
+
+Hooks are wired into ~/.claude/settings.json (with --project, the
+repo's personal .claude/settings.local.json) without disturbing
+anything else there; malformed JSON is never rewritten. The skill
+installs to ~/.claude/skills/jog/ (with --project, the repo's
+committable .claude/skills/). uninstall removes exactly what install
+wrote — and refuses to delete a skill file carrying local edits.
 `
 
 // helpTexts is the per-command help behind `jog <cmd> --help` and
@@ -143,36 +164,19 @@ the newest snapshot). Read-only by default; --fix repairs exactly the
 two gc config keys that keep git's gc off jog's history, and nothing
 else. Exits 0 when healthy, 1 with findings.
 `,
-	"hook": `jog hook claude — Claude Code integration
+	"hook": `jog hook claude — the Claude Code hook entry point
 
 usage:
-  jog hook claude                        hook entry point (JSON on stdin)
-  jog hook claude install [--project]    wire the hooks into Claude Code
-  jog hook claude uninstall [--project]  remove exactly what install wrote
+  jog hook claude    (Claude Code invokes this; JSON payload on stdin)
 
-The entry point snapshots before every Claude prompt and tool call, and
-always exits 0 — a failing hook must never block the user's action. It
-also introduces jog to Claude once per session, one line of context.
-
-install edits ~/.claude/settings.json (with --project, the repo's
-personal .claude/settings.local.json) without disturbing anything else
-in the file; malformed JSON is never rewritten. uninstall removes only
-entries that invoke jog.
+Snapshots before every prompt and tool call, and always exits 0 — a
+failing hook must never block the user's action. It also introduces jog
+to Claude once per session, one line of context. This is the command
+` + "`jog agents install`" + ` wires into Claude Code's settings; it is not
+meant to be run by hand.
 `,
-	"skill": `jog skill claude — the Claude Code skill
-
-usage:
-  jog skill claude install [--project]     install or refresh the skill
-  jog skill claude uninstall [--project]   remove it
-  jog skill claude --print                 write the skill to stdout
-
-The skill teaches agents the recovery workflow — find versions, restore,
-checkpoint before risk, and never declare uncommitted work lost without
-checking the timeline. Default scope is ~/.claude/skills/jog/; --project
-installs into the repo's .claude/skills/, which is safe to commit so
-teammates' agents learn it too. uninstall refuses to delete a skill file
-carrying local edits.
-`,
+	"agents": agentsHelp,
+	"agent":  agentsHelp,
 	"git": `jog git — snapshot, then run the real git command
 
 usage:
@@ -241,20 +245,25 @@ func run(args []string) int {
 	case "back":
 		return cli.Back(args[1:])
 	case "hook":
-		// The runtime entry (`jog hook claude`, JSON on stdin) exits 0
-		// always, even on misconfiguration — a non-zero exit from a hook
-		// blocks the user's tool call or prompt. The install/uninstall
-		// subcommands are human-invoked and error normally.
-		if len(args) >= 2 && args[1] == "claude" {
-			if len(args) == 2 {
-				return cli.HookClaude(os.Stdin, os.Stdout)
-			}
-			return cli.HookSetup(args[2:])
+		// Pure runtime entry (`jog hook claude`, JSON on stdin) — this is
+		// the exact command `jog agents install` wires into settings, so it
+		// exits 0 always, even on misconfiguration: a non-zero exit from a
+		// hook blocks the user's tool call or prompt. Management lives
+		// under `jog agents`; humans reaching for it here get a pointer.
+		if len(args) == 2 && args[1] == "claude" {
+			return cli.HookClaude(os.Stdin, os.Stdout)
+		}
+		if len(args) > 2 {
+			fmt.Fprintln(os.Stderr, "jog: hook management lives under `jog agents` — try `jog agents install`")
+			return 2
 		}
 		fmt.Fprintln(os.Stderr, "jog: unknown hook adapter (want: jog hook claude)")
 		return 0
-	case "skill":
-		return cli.Skill(args[1:])
+	case "agents", "agent":
+		return cli.Agents(args[1:])
+	case "hooks", "skill", "skills":
+		fmt.Fprintf(os.Stderr, "jog: %q moved — `jog agents install|uninstall|list` manages hooks and skills\n", args[0])
+		return 2
 	case "pick":
 		return cli.Pick(args[1:])
 	case "trim":

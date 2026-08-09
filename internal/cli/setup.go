@@ -11,112 +11,79 @@ import (
 	"github.com/tyler-johnson/jog/internal/gitx"
 )
 
-// Wiring management for the Claude Code integration: `jog hook claude
-// install|uninstall` edits Claude Code's settings JSON. Default scope is
-// the home directory — the hook exits in milliseconds outside git repos,
-// so user-level wiring covering every repo is the right default. --project
-// scopes to the current repo's .claude/settings.local.json: the *personal*
-// settings file, deliberately, because a `jog hook claude` command
-// committed to the shared settings.json would fire (and fail) on
-// teammates' machines that don't have jog installed.
-
-const hookSetupUsage = "jog: usage: jog hook claude install|uninstall [--project]"
-
-// HookSetup handles `jog hook claude install|uninstall [--project]`.
-// Unlike the runtime hook entry (iron rule: exit 0 always), these are
-// human-invoked and error normally.
-func HookSetup(args []string) int {
-	action, project := "", false
-	for _, a := range args {
-		switch a {
-		case "install", "uninstall":
-			if action != "" {
-				fmt.Fprintln(os.Stderr, hookSetupUsage)
-				return 2
-			}
-			action = a
-		case "--project":
-			project = true
-		default:
-			fmt.Fprintln(os.Stderr, hookSetupUsage)
-			return 2
-		}
-	}
-	if action == "" {
-		fmt.Fprintln(os.Stderr, hookSetupUsage)
-		return 2
-	}
-
-	path, err := claudeSettingsPath(project)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "jog:", err)
-		return 1
-	}
-	if action == "install" {
-		return hookInstall(path, project)
-	}
-	return hookUninstall(path)
-}
-
-func hookInstall(path string, project bool) int {
-	m, err := loadSettings(path)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "jog:", err)
-		return 1
-	}
-	cmd := hookCommand()
-	added, err := wireHooks(m, cmd)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "jog:", err)
-		return 1
-	}
-	if len(added) == 0 {
-		fmt.Printf("hooks already wired in %s — nothing to do\n", path)
-		return 0
-	}
-	if err := writeSettings(path, m); err != nil {
-		fmt.Fprintln(os.Stderr, "jog:", err)
-		return 1
-	}
-	fmt.Printf("wired %s in %s\n", strings.Join(added, " and "), path)
-	fmt.Printf("  hook command: %s\n", cmd)
-	if project {
-		fmt.Println("  (settings.local.json is personal and not meant to be committed —")
-		fmt.Println("   a committed hook would break for teammates without jog installed)")
-	}
-	fmt.Println("Claude Code snapshots this way before every prompt and tool call.")
-	fmt.Println("`jog hook claude uninstall` removes it; `jog doctor` verifies the wiring.")
-	return 0
-}
-
-func hookUninstall(path string) int {
-	if _, err := os.Stat(path); os.IsNotExist(err) {
-		fmt.Printf("no settings file at %s — nothing to remove\n", path)
-		return 0
-	}
-	m, err := loadSettings(path)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "jog:", err)
-		return 1
-	}
-	removed := unwireHooks(m)
-	if removed == 0 {
-		fmt.Printf("no jog hooks found in %s — nothing to remove\n", path)
-		return 0
-	}
-	if err := writeSettings(path, m); err != nil {
-		fmt.Fprintln(os.Stderr, "jog:", err)
-		return 1
-	}
-	fmt.Printf("removed %d jog hook(s) from %s — everything else untouched\n", removed, path)
-	return 0
-}
+// Claude Code hook wiring — the client-specific half behind `jog agents`.
+// The command written into settings is the runtime entry `jog hook claude`
+// (see HookClaude); everything in this file only edits configuration.
 
 // jogHookEvents is what install wires: the same two events the README
 // documents, covering every tool-call and prompt boundary.
 var jogHookEvents = []struct{ name, matcher string }{
 	{"PreToolUse", "Bash|Edit|Write|NotebookEdit"},
 	{"UserPromptSubmit", ""},
+}
+
+func claudeHooksInstall(project bool) (string, bool, error) {
+	path, err := claudeSettingsPath(project)
+	if err != nil {
+		return "", false, err
+	}
+	m, err := loadSettings(path)
+	if err != nil {
+		return "", false, err
+	}
+	cmd := hookCommand()
+	added, err := wireHooks(m, cmd)
+	if err != nil {
+		return "", false, err
+	}
+	if len(added) == 0 {
+		return "already wired in " + path, false, nil
+	}
+	if err := writeSettings(path, m); err != nil {
+		return "", false, err
+	}
+	return "wired " + strings.Join(added, " and ") + " in " + path + " (command: " + cmd + ")", true, nil
+}
+
+func claudeHooksUninstall(project bool) (string, bool, error) {
+	path, err := claudeSettingsPath(project)
+	if err != nil {
+		return "", false, err
+	}
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		return "no settings file at " + path + " — nothing to remove", false, nil
+	}
+	m, err := loadSettings(path)
+	if err != nil {
+		return "", false, err
+	}
+	removed := unwireHooks(m)
+	if removed == 0 {
+		return "no jog hooks in " + path + " — nothing to remove", false, nil
+	}
+	if err := writeSettings(path, m); err != nil {
+		return "", false, err
+	}
+	return fmt.Sprintf("removed %d jog hook(s) from %s — everything else untouched", removed, path), true, nil
+}
+
+// claudeHooksLocation reports where `jog hook claude` is wired — user
+// scope first, then the current repo's shared and personal settings — or
+// "" when it isn't.
+func claudeHooksLocation() string {
+	if home, err := os.UserHomeDir(); err == nil {
+		if claudeHooksWired(filepath.Join(home, ".claude", "settings.json")) {
+			return "~/.claude/settings.json"
+		}
+	}
+	if root, err := projectRoot(); err == nil {
+		for _, f := range []string{"settings.json", "settings.local.json"} {
+			if claudeHooksWired(filepath.Join(root, ".claude", f)) {
+				return ".claude/" + f + " (project)"
+			}
+		}
+	}
+	return ""
 }
 
 // hookCommand picks how the hook invokes jog: the bare name when jog is on

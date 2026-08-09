@@ -55,7 +55,7 @@ func Doctor(args []string) int {
 	if repo != nil {
 		d.checkRepo(repo, fix)
 	}
-	d.checkTriggers(repo)
+	d.checkTriggers()
 
 	if d.findings == 0 {
 		fmt.Println("\nno findings — the net is under you")
@@ -182,47 +182,27 @@ func (d *doctor) checkRepo(repo *gitx.Repo, fix bool) {
 // can't see a live shell's aliases, so it is reported, never asserted).
 // Neither wired at all is the real finding: a silent engine feels safe
 // while capturing nothing.
-func (d *doctor) checkTriggers(repo *gitx.Repo) {
+func (d *doctor) checkTriggers() {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		d.info("triggers", "cannot resolve home directory; wiring checks skipped")
 		return
 	}
 
-	// User scope first, then the project's shared and personal settings —
-	// wherever the user chose to wire, doctor should find it.
-	settings := []struct{ path, label string }{
-		{filepath.Join(home, ".claude", "settings.json"), "~/.claude/settings.json"},
-	}
-	var top string
-	if repo != nil {
-		if t, err := repo.Run("rev-parse", "--show-toplevel"); err == nil {
-			top = t
-			settings = append(settings,
-				struct{ path, label string }{filepath.Join(top, ".claude", "settings.json"), ".claude/settings.json"},
-				struct{ path, label string }{filepath.Join(top, ".claude", "settings.local.json"), ".claude/settings.local.json"},
-			)
-		}
-	}
+	// Wherever the user chose to wire — user scope or either of the
+	// project's settings files — doctor should find it.
 	hooks := false
-	for _, s := range settings {
-		if claudeHooksWired(s.path) {
-			d.ok("claude hooks", "`jog hook claude` wired in "+s.label)
-			hooks = true
-			break
-		}
-	}
-	if !hooks {
-		d.info("claude hooks", "not wired (optional — `jog hook claude install`)")
+	if loc := claudeHooksLocation(); loc != "" {
+		d.ok("claude hooks", "`jog hook claude` wired in "+loc)
+		hooks = true
+	} else {
+		d.info("claude hooks", "not wired (optional — `jog agents install`)")
 	}
 
-	switch {
-	case claudeSkillInstalled(home):
-		d.ok("claude skill", "installed at ~/.claude/skills/jog/SKILL.md")
-	case top != "" && fileExists(filepath.Join(top, ".claude", "skills", "jog", "SKILL.md")):
-		d.ok("claude skill", "installed at .claude/skills/jog/SKILL.md (project)")
-	default:
-		d.info("claude skill", "not installed (optional — `jog skill claude install`)")
+	if loc := claudeSkillLocation(); loc != "" {
+		d.ok("claude skill", "installed at "+loc)
+	} else {
+		d.info("claude skill", "not installed (optional — `jog agents install`)")
 	}
 
 	aliasFile := ""
@@ -240,7 +220,7 @@ func (d *doctor) checkTriggers(repo *gitx.Repo) {
 	}
 
 	if !hooks && aliasFile == "" {
-		d.warn("triggers", "neither the alias nor Claude hooks are wired — snapshots only happen when you run `jog` by hand (`jog hook claude install`, or add the alias)")
+		d.warn("triggers", "neither the alias nor agent hooks are wired — snapshots only happen when you run `jog` by hand (`jog agents install`, or add the alias)")
 	}
 }
 

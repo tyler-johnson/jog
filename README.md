@@ -92,17 +92,21 @@ Scripts, IDEs, and CI are untouched — they resolve `git` on PATH and get real
 git. That's a feature: jog stays out of every code path that expects exact
 git behavior.
 
-**3. Wire up Claude Code** (optional):
+**3. Wire up your agents** (optional):
 
 ```sh
-jog hook claude install    # hooks: snapshot before every prompt and tool call
-jog skill claude install   # skill: teach agents the recovery workflow
+jog agents install   # hooks + skill for every agent client on this machine
 ```
 
-The hooks land in user-level `~/.claude/settings.json` — one wiring covers
-every repo; the hook exits in milliseconds outside git repos and never
-blocks a tool call. Install writes exactly this (paste it yourself if you
-prefer):
+One command, two surfaces per client: hooks (snapshot before every prompt
+and tool call) and a skill (teaches the agent the recovery workflow).
+`jog agents list` shows every supported client — Claude Code today — and
+what's installed; clients not found on the machine are skipped.
+
+For Claude Code, the hooks land in user-level `~/.claude/settings.json` —
+one wiring covers every repo; the hook exits in milliseconds outside git
+repos and never blocks a tool call. Install writes exactly this (paste it
+yourself if you prefer):
 
 ```json
 {
@@ -121,11 +125,11 @@ prefer):
 (If jog isn't on PATH for non-interactive shells, install writes the
 absolute path instead — and tells you so.)
 
-`--project` scopes either command to the current repo: hooks go to the
+`--project` scopes the command to the current repo: hooks go to the
 personal `.claude/settings.local.json` (a committed hook command would
 break for teammates without jog), the skill to the committable
-`.claude/skills/`. `uninstall` removes exactly what install wrote and
-touches nothing else.
+`.claude/skills/`. `jog agents uninstall` removes exactly what install
+wrote and touches nothing else.
 
 Once the hooks are wired, jog introduces itself to Claude once per session
 — a single line of context saying snapshots are live and how to restore —
@@ -152,8 +156,7 @@ Two disjoint namespaces, one rule: **`jog git` is the only door to git.**
 | `jog pick [--all] <path>` | scrub through a file's versions — list, preview, enter to restore (`q` leaves everything untouched) |
 | `jog trim [--dry-run]` | apply the retention taper; the previous tip stays at `refs/jog/@trash/<branch>` until the next trim |
 | `jog doctor [--fix]` | verify invariants, wiring, and liveness (`--fix` repairs the gc config) |
-| `jog hook claude install` | wire the Claude Code hooks (`uninstall` removes it; `--project`: this repo only) |
-| `jog skill claude install` | install the Claude Code skill that teaches agents the recovery workflow (`uninstall`, `--print`; `--project`: this repo) |
+| `jog agents install` | hooks + skill for every agent client on this machine (`uninstall`, `list`; `[hooks\|skill]` and client names narrow it; `--project`: this repo) |
 | `jog version` | print jog's version |
 
 `--at` (and `since`'s target slot) accepts a snap id from `jog snaps` or a

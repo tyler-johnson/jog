@@ -674,7 +674,7 @@ func TestDoctor(t *testing.T) {
 	tr2.Commit("base")
 	runJog(t, tr2.Dir, "-m", "first")
 	stdout, _, code = runJogEnv(t, tr2.Dir, []string{"HOME=" + bare}, "doctor")
-	if code != 1 || !strings.Contains(stdout, "neither the alias nor Claude hooks") {
+	if code != 1 || !strings.Contains(stdout, "neither the alias nor agent hooks") {
 		t.Errorf("no triggers: code=%d\n%s", code, stdout)
 	}
 }
@@ -885,214 +885,12 @@ func TestPick(t *testing.T) {
 	}
 }
 
-// TestSkill: the skill lifecycle — install under HOME (idempotent),
-// --print, --project scope, uninstall (refusing to delete local edits),
-// and unknown-adapter rejection.
-func TestSkill(t *testing.T) {
-	home := t.TempDir()
-	env := []string{"HOME=" + home}
-	dir := t.TempDir()
-	path := filepath.Join(home, ".claude", "skills", "jog", "SKILL.md")
-
-	stdout, _, code := runJogEnv(t, dir, env, "skill", "claude", "install")
-	if code != 0 || !strings.Contains(stdout, "installed") {
-		t.Fatalf("install: code=%d\n%s", code, stdout)
-	}
-	// Symmetry with hook install: the way out is printed on the way in.
-	if !strings.Contains(stdout, "uninstall") {
-		t.Errorf("install output doesn't mention uninstall:\n%s", stdout)
-	}
-	b, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	content := string(b)
-	if !strings.HasPrefix(content, "---\n") || !strings.Contains(content, "name: jog") ||
-		!strings.Contains(content, "description:") {
-		t.Errorf("skill missing frontmatter:\n%.200s", content)
-	}
-
-	stdout, _, code = runJogEnv(t, dir, env, "skill", "claude", "install")
-	if code != 0 || !strings.Contains(stdout, "up to date") {
-		t.Errorf("reinstall: code=%d\n%s", code, stdout)
-	}
-
-	printed, _, code := runJogEnv(t, dir, env, "skill", "--print", "claude")
-	if code != 0 || printed != content {
-		t.Errorf("--print: code=%d, output differs from installed file", code)
-	}
-
-	// Project scope lands in the repo's .claude/skills, found from a subdir.
-	tr := testrepo.New(t)
-	tr.Write("a.txt", "x\n")
-	tr.Commit("base")
-	sub := filepath.Join(tr.Dir, "deep")
-	if err := os.MkdirAll(sub, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	_, _, code = runJogEnv(t, sub, env, "skill", "claude", "install", "--project")
-	projPath := filepath.Join(tr.Dir, ".claude", "skills", "jog", "SKILL.md")
-	if code != 0 {
-		t.Fatalf("--project install: code=%d", code)
-	}
-	if _, err := os.Stat(projPath); err != nil {
-		t.Errorf("--project skill not at repo toplevel: %v", err)
-	}
-
-	// Uninstall refuses a locally modified skill, removes a pristine one.
-	if err := os.WriteFile(path, []byte(content+"\nlocal edit\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	_, stderr, code := runJogEnv(t, dir, env, "skill", "claude", "uninstall")
-	if code != 1 || !strings.Contains(stderr, "differs") {
-		t.Errorf("uninstall modified skill: code=%d stderr=%q", code, stderr)
-	}
-	if _, err := os.Stat(path); err != nil {
-		t.Error("modified skill was deleted")
-	}
-	if err := os.WriteFile(path, b, 0o644); err != nil {
-		t.Fatal(err)
-	}
-	stdout, _, code = runJogEnv(t, dir, env, "skill", "claude", "uninstall")
-	if code != 0 || !strings.Contains(stdout, "removed") {
-		t.Errorf("uninstall: code=%d\n%s", code, stdout)
-	}
-	if _, err := os.Stat(path); !os.IsNotExist(err) {
-		t.Error("skill file still present after uninstall")
-	}
-	stdout, _, code = runJogEnv(t, dir, env, "skill", "claude", "uninstall")
-	if code != 0 || !strings.Contains(stdout, "nothing to remove") {
-		t.Errorf("uninstall twice: code=%d\n%s", code, stdout)
-	}
-
-	_, stderr, code = runJogEnv(t, dir, env, "skill", "codex", "install")
-	if code != 2 || !strings.Contains(stderr, "adapter") {
-		t.Errorf("unknown adapter: code=%d stderr=%q", code, stderr)
-	}
-}
-
-// TestHookSetup: `jog hook claude install|uninstall` edits Claude Code
-// settings surgically — wiring both events, idempotent, preserving
-// everything it didn't add, and erroring on unparseable files.
-func TestHookSetup(t *testing.T) {
-	home := t.TempDir()
-	env := []string{"HOME=" + home}
-	dir := t.TempDir()
-	path := filepath.Join(home, ".claude", "settings.json")
-	read := func() map[string]any {
-		t.Helper()
-		b, err := os.ReadFile(path)
-		if err != nil {
-			t.Fatal(err)
-		}
-		var m map[string]any
-		if err := json.Unmarshal(b, &m); err != nil {
-			t.Fatalf("settings not valid JSON: %v\n%s", err, b)
-		}
-		return m
-	}
-
-	// Fresh install creates the file with both events.
-	stdout, _, code := runJogEnv(t, dir, env, "hook", "claude", "install")
-	if code != 0 || !strings.Contains(stdout, "PreToolUse") || !strings.Contains(stdout, "UserPromptSubmit") {
-		t.Fatalf("install: code=%d\n%s", code, stdout)
-	}
-	m := read()
-	hooks, _ := m["hooks"].(map[string]any)
-	if hooks["PreToolUse"] == nil || hooks["UserPromptSubmit"] == nil {
-		t.Fatalf("events missing: %v", m)
-	}
-
-	// Idempotent.
-	stdout, _, code = runJogEnv(t, dir, env, "hook", "claude", "install")
-	if code != 0 || !strings.Contains(stdout, "already wired") {
-		t.Errorf("reinstall: code=%d\n%s", code, stdout)
-	}
-
-	// Uninstall removes exactly the jog entries: a foreign key, a foreign
-	// hook sharing our event, and a foreign entry sharing a matcher group
-	// with ours must all survive.
-	seeded := `{
-  "model": "opus",
-  "hooks": {
-    "PreToolUse": [
-      {"matcher": "Bash", "hooks": [
-        {"type": "command", "command": "jog hook claude"},
-        {"type": "command", "command": "echo other"}
-      ]},
-      {"matcher": "Write", "hooks": [{"type": "command", "command": "prettier"}]}
-    ],
-    "UserPromptSubmit": [{"hooks": [{"type": "command", "command": "jog hook claude"}]}],
-    "Stop": [{"hooks": [{"type": "command", "command": "notify-send done"}]}]
-  }
-}`
-	if err := os.WriteFile(path, []byte(seeded), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	stdout, _, code = runJogEnv(t, dir, env, "hook", "claude", "uninstall")
-	if code != 0 || !strings.Contains(stdout, "removed 2") {
-		t.Fatalf("uninstall: code=%d\n%s", code, stdout)
-	}
-	m = read()
-	if m["model"] != "opus" {
-		t.Error("unrelated top-level key lost")
-	}
-	out, _ := json.Marshal(m)
-	s := string(out)
-	if strings.Contains(s, "jog hook claude") {
-		t.Errorf("jog entries survive uninstall:\n%s", s)
-	}
-	for _, want := range []string{"echo other", "prettier", "notify-send done"} {
-		if !strings.Contains(s, want) {
-			t.Errorf("foreign hook %q lost:\n%s", want, s)
-		}
-	}
-	hooks, _ = m["hooks"].(map[string]any)
-	if hooks["UserPromptSubmit"] != nil {
-		t.Error("emptied UserPromptSubmit event not pruned")
-	}
-
-	stdout, _, code = runJogEnv(t, dir, env, "hook", "claude", "uninstall")
-	if code != 0 || !strings.Contains(stdout, "nothing to remove") {
-		t.Errorf("uninstall twice: code=%d\n%s", code, stdout)
-	}
-
-	// Malformed settings: hard error, file untouched.
-	if err := os.WriteFile(path, []byte("{not json"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	_, stderr, code := runJogEnv(t, dir, env, "hook", "claude", "install")
-	if code != 1 || !strings.Contains(stderr, "not valid JSON") {
-		t.Errorf("malformed settings: code=%d stderr=%q", code, stderr)
-	}
-	if b, _ := os.ReadFile(path); string(b) != "{not json" {
-		t.Error("malformed settings file was rewritten")
-	}
-
-	// --project scope writes the repo's personal settings file.
-	tr := testrepo.New(t)
-	tr.Write("a.txt", "x\n")
-	tr.Commit("base")
-	_, _, code = runJogEnv(t, tr.Dir, env, "hook", "claude", "install", "--project")
-	if code != 0 {
-		t.Fatalf("--project install: code=%d", code)
-	}
-	if _, err := os.Stat(filepath.Join(tr.Dir, ".claude", "settings.local.json")); err != nil {
-		t.Errorf("--project settings not written: %v", err)
-	}
-
-	_, stderr, code = runJogEnv(t, dir, env, "hook", "claude", "frobnicate")
-	if code != 2 || !strings.Contains(stderr, "usage") {
-		t.Errorf("bad subcommand: code=%d stderr=%q", code, stderr)
-	}
-}
-
 // TestPerCommandHelp: every jog verb answers --help and `jog help <verb>`
 // with a usage block — except git, where every argument (including
 // --help) belongs to real git. (TestHelp covers the global forms.)
 func TestPerCommandHelp(t *testing.T) {
 	dir := t.TempDir() // outside any repo: help must not need one
-	verbs := []string{"snaps", "since", "back", "pick", "trim", "doctor", "hook", "skill"}
+	verbs := []string{"snaps", "since", "back", "pick", "trim", "doctor", "hook", "agents", "agent"}
 	for _, v := range verbs {
 		stdout, _, code := runJog(t, dir, v, "--help")
 		if code != 0 || !strings.Contains(stdout, "usage:") || !strings.Contains(stdout, v) {
@@ -1164,5 +962,234 @@ func TestShortTimeTargets(t *testing.T) {
 	}
 	if b, _ := os.ReadFile(filepath.Join(tr.Dir, "w.txt")); string(b) != "three hours old\n" {
 		t.Errorf("back --at 2h restored %q, want the three-hour-old version", b)
+	}
+}
+
+// TestAgents: the full lifecycle at user scope — one command installs
+// both surfaces, idempotent reinstall, list reflects state, surface
+// selection, the modified-skill refusal, unknown clients, and the
+// singular alias.
+func TestAgents(t *testing.T) {
+	home := t.TempDir()
+	// Client detection: ~/.claude existing is the signal (no claude binary
+	// needed on PATH).
+	if err := os.MkdirAll(filepath.Join(home, ".claude"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	env := []string{"HOME=" + home}
+	dir := t.TempDir()
+	settings := filepath.Join(home, ".claude", "settings.json")
+	skillPath := filepath.Join(home, ".claude", "skills", "jog", "SKILL.md")
+
+	stdout, stderr, code := runJogEnv(t, dir, env, "agents", "install")
+	if code != 0 {
+		t.Fatalf("install: code=%d stderr=%s", code, stderr)
+	}
+	for _, want := range []string{"hooks", "skill", "PreToolUse", "UserPromptSubmit", "uninstall"} {
+		if !strings.Contains(stdout, want) {
+			t.Errorf("install output missing %q:\n%s", want, stdout)
+		}
+	}
+	b, err := os.ReadFile(settings)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var m map[string]any
+	if err := json.Unmarshal(b, &m); err != nil {
+		t.Fatalf("settings not valid JSON: %v", err)
+	}
+	sb, err := os.ReadFile(skillPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(string(sb), "---\n") || !strings.Contains(string(sb), "name: jog") {
+		t.Errorf("skill missing frontmatter:\n%.120s", sb)
+	}
+
+	// Idempotent: both surfaces report already-done, nothing changes.
+	stdout, _, code = runJogEnv(t, dir, env, "agents", "install")
+	if code != 0 || !strings.Contains(stdout, "already wired") || !strings.Contains(stdout, "up to date") {
+		t.Errorf("reinstall: code=%d\n%s", code, stdout)
+	}
+
+	stdout, _, code = runJogEnv(t, dir, env, "agents", "list")
+	if code != 0 || !strings.Contains(stdout, "settings.json") || !strings.Contains(stdout, "SKILL.md") {
+		t.Errorf("list after install:\n%s", stdout)
+	}
+
+	// Surface selection: uninstall hooks only; the skill must survive.
+	stdout, _, code = runJogEnv(t, dir, env, "agents", "uninstall", "hooks")
+	if code != 0 || !strings.Contains(stdout, "removed") {
+		t.Errorf("uninstall hooks: code=%d\n%s", code, stdout)
+	}
+	if b, _ := os.ReadFile(settings); strings.Contains(string(b), "jog hook claude") {
+		t.Error("jog hooks survive `agents uninstall hooks`")
+	}
+	if _, err := os.Stat(skillPath); err != nil {
+		t.Error("skill removed by `agents uninstall hooks`")
+	}
+
+	// The modified-skill refusal, then a clean removal.
+	if err := os.WriteFile(skillPath, append(sb, []byte("local edit\n")...), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, stderr, code = runJogEnv(t, dir, env, "agents", "uninstall", "skill")
+	if code != 1 || !strings.Contains(stderr, "differs") {
+		t.Errorf("uninstall modified skill: code=%d stderr=%q", code, stderr)
+	}
+	if _, err := os.Stat(skillPath); err != nil {
+		t.Error("modified skill was deleted")
+	}
+	if err := os.WriteFile(skillPath, sb, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	stdout, _, code = runJogEnv(t, dir, env, "agents", "uninstall", "skill")
+	if code != 0 || !strings.Contains(stdout, "removed") {
+		t.Errorf("uninstall skill: code=%d\n%s", code, stdout)
+	}
+	if _, err := os.Stat(skillPath); !os.IsNotExist(err) {
+		t.Error("skill still present after uninstall")
+	}
+
+	stdout, _, code = runJogEnv(t, dir, env, "agents", "list")
+	if code != 0 || !strings.Contains(stdout, "not installed") {
+		t.Errorf("list after uninstall:\n%s", stdout)
+	}
+
+	_, stderr, code = runJogEnv(t, dir, env, "agents", "install", "codex")
+	if code != 2 || !strings.Contains(stderr, "supported") {
+		t.Errorf("unknown client: code=%d stderr=%q", code, stderr)
+	}
+
+	stdout, _, code = runJogEnv(t, dir, env, "agent", "list")
+	if code != 0 || !strings.Contains(stdout, "claude") {
+		t.Errorf("singular alias: code=%d\n%s", code, stdout)
+	}
+
+	_, stderr, code = runJogEnv(t, dir, env, "agents")
+	if code != 2 || !strings.Contains(stderr, "usage") {
+		t.Errorf("bare agents: code=%d stderr=%q", code, stderr)
+	}
+}
+
+// TestAgentsDetectionAndScope: undetected clients are skipped (and
+// nothing is created), naming a client overrides detection, --project
+// lands in the repo's personal settings + committable skills, and
+// malformed settings are a hard error that never rewrites the file.
+func TestAgentsDetectionAndScope(t *testing.T) {
+	home := t.TempDir() // no ~/.claude, and PATH below carries no claude binary
+	env := []string{"HOME=" + home, "PATH=/usr/bin:/bin"}
+	dir := t.TempDir()
+
+	stdout, _, code := runJogEnv(t, dir, env, "agents", "install")
+	if code != 0 || !strings.Contains(stdout, "skipped") {
+		t.Fatalf("undetected install: code=%d\n%s", code, stdout)
+	}
+	if _, err := os.Stat(filepath.Join(home, ".claude")); !os.IsNotExist(err) {
+		t.Error("skipped install still created ~/.claude")
+	}
+
+	// Naming the client overrides detection.
+	stdout, stderr, code := runJogEnv(t, dir, env, "agents", "install", "claude")
+	if code != 0 || !strings.Contains(stdout, "wired") {
+		t.Fatalf("forced install: code=%d stderr=%s\n%s", code, stderr, stdout)
+	}
+
+	// --project: personal settings and committable skill at the repo
+	// toplevel, found from a subdirectory.
+	tr := testrepo.New(t)
+	tr.Write("a.txt", "x\n")
+	tr.Commit("base")
+	sub := filepath.Join(tr.Dir, "deep")
+	if err := os.MkdirAll(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	_, _, code = runJogEnv(t, sub, env, "agents", "install", "claude", "--project")
+	if code != 0 {
+		t.Fatalf("--project install: code=%d", code)
+	}
+	if _, err := os.Stat(filepath.Join(tr.Dir, ".claude", "settings.local.json")); err != nil {
+		t.Errorf("--project hooks not in settings.local.json: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(tr.Dir, ".claude", "skills", "jog", "SKILL.md")); err != nil {
+		t.Errorf("--project skill not at repo toplevel: %v", err)
+	}
+
+	// Malformed settings: hard error, file untouched.
+	settings := filepath.Join(home, ".claude", "settings.json")
+	if err := os.WriteFile(settings, []byte("{not json"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, stderr, code = runJogEnv(t, dir, env, "agents", "install", "claude")
+	if code != 1 || !strings.Contains(stderr, "not valid JSON") {
+		t.Errorf("malformed settings: code=%d stderr=%q", code, stderr)
+	}
+	if b, _ := os.ReadFile(settings); string(b) != "{not json" {
+		t.Error("malformed settings file was rewritten")
+	}
+}
+
+// TestAgentsUninstallSurgical: uninstall removes exactly the entries that
+// invoke jog — a foreign top-level key, a foreign hook sharing our event,
+// and a foreign entry sharing a matcher group with ours all survive; the
+// structures jog emptied are pruned.
+func TestAgentsUninstallSurgical(t *testing.T) {
+	home := t.TempDir()
+	env := []string{"HOME=" + home}
+	dir := t.TempDir()
+	path := filepath.Join(home, ".claude", "settings.json")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	seeded := `{
+  "model": "opus",
+  "hooks": {
+    "PreToolUse": [
+      {"matcher": "Bash", "hooks": [
+        {"type": "command", "command": "jog hook claude"},
+        {"type": "command", "command": "echo other"}
+      ]},
+      {"matcher": "Write", "hooks": [{"type": "command", "command": "prettier"}]}
+    ],
+    "UserPromptSubmit": [{"hooks": [{"type": "command", "command": "jog hook claude"}]}],
+    "Stop": [{"hooks": [{"type": "command", "command": "notify-send done"}]}]
+  }
+}`
+	if err := os.WriteFile(path, []byte(seeded), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	stdout, _, code := runJogEnv(t, dir, env, "agents", "uninstall", "hooks", "claude")
+	if code != 0 || !strings.Contains(stdout, "removed 2") {
+		t.Fatalf("uninstall: code=%d\n%s", code, stdout)
+	}
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var m map[string]any
+	if err := json.Unmarshal(b, &m); err != nil {
+		t.Fatalf("settings not valid JSON after uninstall: %v", err)
+	}
+	if m["model"] != "opus" {
+		t.Error("unrelated top-level key lost")
+	}
+	s := string(b)
+	if strings.Contains(s, "jog hook claude") {
+		t.Errorf("jog entries survive uninstall:\n%s", s)
+	}
+	for _, want := range []string{"echo other", "prettier", "notify-send done"} {
+		if !strings.Contains(s, want) {
+			t.Errorf("foreign hook %q lost:\n%s", want, s)
+		}
+	}
+	hooks, _ := m["hooks"].(map[string]any)
+	if hooks["UserPromptSubmit"] != nil {
+		t.Error("emptied UserPromptSubmit event not pruned")
+	}
+
+	stdout, _, code = runJogEnv(t, dir, env, "agents", "uninstall", "hooks")
+	if code != 0 || !strings.Contains(stdout, "nothing to remove") {
+		t.Errorf("uninstall twice: code=%d\n%s", code, stdout)
 	}
 }
