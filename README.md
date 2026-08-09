@@ -29,6 +29,16 @@ scrub with a live diff preview, enter reads the diff, `r` restores the
 tree after a y/n confirm. Short windows (a phone SSH session) show one
 frame at a time. Piped, it prints the plain list shown above.
 
+- [Why jog](#why-jog)
+- [Install](#install)
+- [Agents](#agents)
+- [Usage](#usage)
+- [Recovery cookbook](#recovery-cookbook)
+- [What jog will never touch](#what-jog-will-never-touch)
+- [Why not jog](#why-not-jog)
+- [Configuration](#configuration)
+- [How it compares](#how-it-compares)
+
 ## Why jog
 
 Pick the pitch that fits how you work:
@@ -104,59 +114,59 @@ git behavior.
 jog agents install   # hooks + skill for every agent client on this machine
 ```
 
-One command, two surfaces per client: hooks (snapshot before every prompt
-and tool call) and a skill (teaches the agent the recovery workflow).
-`jog agents list` shows every supported client — Claude Code, Codex,
-Copilot CLI, Cursor, Gemini CLI, and OpenCode — and what's installed;
-clients not found on the machine are skipped.
-
-For Claude Code, the hooks land in user-level `~/.claude/settings.json` —
-one wiring covers every repo; the hook exits in milliseconds outside git
-repos and never blocks a tool call. Install writes exactly this (paste it
-yourself if you prefer):
-
-```json
-{
-  "hooks": {
-    "PreToolUse": [{
-      "matcher": "Bash|Edit|Write|NotebookEdit",
-      "hooks": [{ "type": "command", "command": "jog hook claude" }]
-    }],
-    "UserPromptSubmit": [{
-      "hooks": [{ "type": "command", "command": "jog hook claude" }]
-    }]
-  }
-}
-```
-
-Every other client gets the equivalent wiring in its own config dialect
-and its own `jog hook <client>` adapter: Codex in `~/.codex/hooks.json`
-(review with `/hooks` — Codex requires trusting non-managed hooks before
-they run), Copilot in `~/.copilot/settings.json`, Gemini in
-`~/.gemini/settings.json`, Cursor in its own `~/.cursor/hooks.json`
-format (read by both the IDE and the CLI), and OpenCode as a small plugin
-at `~/.config/opencode/plugins/jog.js`. Skills install to each client's
-own skills directory. The install output prints every path it touched.
-
-(If jog isn't on PATH for non-interactive shells, install writes the
-absolute path instead — and tells you so.)
-
-`--project` scopes the command to the current repo instead of the home
-directory. Some clients keep project hooks in a personal, uncommitted
-file (Claude's `.claude/settings.local.json`, Copilot's
-`.github/copilot/settings.local.json`); the rest are committable — and a
-committed hook only works for teammates who also have jog installed.
-`jog agents uninstall` removes exactly what install wrote and touches
-nothing else.
-
-Once the hooks are wired, jog introduces itself to the agent once per
-session — a single line of context saying snapshots are live and how to
-restore — on the clients whose hook protocol can inject context (Claude
-Code, Codex, Gemini, OpenCode). Each client's installed skill goes further
-and teaches the full recovery workflow.
+The [Agents](#agents) section below has the full picture — which clients
+are supported, where the wiring lands, and what each surface does.
 
 **4. Verify:** make any change in a repo, run `git status`, then `jog log`
 — you should see a `pre: git status` entry.
+
+## Agents
+
+Agents are why jog exists twice over: they're the fastest writers your
+worktree has ever had, and the first to delete something you still needed.
+jog integrates with every supported client at two surfaces:
+
+- **Hooks** — snapshot before every prompt and every mutating tool call,
+  so each agent action has a boundary to roll back to.
+- **A skill** — teaches the agent the recovery workflow itself: list
+  versions with `jog log`, restore with `jog restore`, checkpoint with
+  `jog -m` before risky work, and never declare uncommitted work gone
+  without checking jog first.
+
+| client | hooks | skill |
+|---|---|---|
+| Claude Code | `~/.claude/settings.json` — PreToolUse + UserPromptSubmit | `~/.claude/skills/jog/` |
+| Codex | `~/.codex/hooks.json` — needs a one-time trust via `/hooks` | `~/.agents/skills/jog/` |
+| Copilot CLI | `~/.copilot/settings.json` | `~/.copilot/skills/jog/` |
+| Cursor (IDE + CLI) | `~/.cursor/hooks.json` | `~/.cursor/skills/jog/` |
+| Gemini CLI | `~/.gemini/settings.json` | `~/.gemini/skills/jog/` |
+| OpenCode | plugin at `~/.config/opencode/plugins/jog.js` | `~/.config/opencode/skills/jog/` |
+
+Every hook is a thin `jog hook <client>` adapter: it exits in
+milliseconds outside git repos and always exits 0, so a broken setup can
+never block a tool call. Where the client's hook protocol can inject
+context (Claude Code, Codex, Gemini, OpenCode), jog also introduces
+itself once per session — one line saying snapshots are live and how to
+restore.
+
+```sh
+jog agents install     # both surfaces, every client found on this machine
+jog agents list        # every supported client and what's installed
+jog agents uninstall   # removes exactly what install wrote
+```
+
+Name a surface or a client to narrow any of them (`jog agents install
+hooks claude`). `--project` scopes the wiring to the current repo instead
+of the home directory — some clients keep project hooks in a personal,
+uncommitted file (Claude's `.claude/settings.local.json`, Copilot's
+`.github/copilot/settings.local.json`); the rest are committable, and a
+committed hook only works for teammates who also have jog installed.
+
+Install is additive and careful: existing JSON fields are preserved,
+malformed JSON is never rewritten, uninstall refuses to delete a skill
+file carrying local edits, and if jog isn't on PATH for non-interactive
+shells the hook is written with an absolute path (and says so). The
+install output prints every path it touched.
 
 ## Usage
 
