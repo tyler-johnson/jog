@@ -8,6 +8,8 @@ import (
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 )
 
 // PickItem is one selectable row.
@@ -15,6 +17,17 @@ type PickItem struct {
 	ID    string
 	Label string
 }
+
+// The full-screen frame: title above, footer below, and between them two
+// bordered boxes — list over preview — that together fill the window.
+// Focus is the border color: the focused frame is cyan, the other dim.
+var (
+	styleTitle  = lipgloss.NewStyle().Bold(true)
+	styleFooter = lipgloss.NewStyle().Faint(true)
+	styleAsk    = lipgloss.NewStyle().Reverse(true).Bold(true)
+	boxFocused  = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("6"))
+	boxBlurred  = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("8"))
+)
 
 // RunPick shows a two-frame browser — a list over a preview — and returns
 // the chosen item's ID, or aborted=true when the user backs out (q) —
@@ -123,47 +136,68 @@ func (m *pickModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m *pickModel) View() string {
-	if m.height == 0 {
+	if m.height == 0 || m.width < 4 {
 		return ""
 	}
-	// Layout: title, list window (≤ third of the screen), rule, preview.
-	listH := max(3, min(len(m.items), m.height/3))
-	previewH := m.height - listH - 3
+	listH, previewH := m.layout()
+	inner := m.width - 2 // box content width, inside the borders
 
-	var b strings.Builder
-	b.WriteString(m.title + "\n")
-
-	// List window scrolled around the cursor. The cursor row dims when
-	// focus is on the diff, so the focused frame is always evident.
+	// List window scrolled around the cursor; the cursor row is inverse
+	// video padded to the full box width.
+	var list []string
 	start := max(0, min(m.cursor-listH/2, len(m.items)-listH))
 	for i := start; i < start+listH && i < len(m.items); i++ {
-		line := "  " + m.items[i].Label
+		prefix := "  "
 		if i == m.cursor {
-			style := "\x1b[7m"
-			if m.focusDiff {
-				style = "\x1b[2;7m"
-			}
-			line = style + "> " + m.items[i].Label + "\x1b[0m"
+			prefix = "> "
 		}
-		b.WriteString(line + "\n")
+		line := ansi.Truncate(prefix+m.items[i].Label, inner, "…")
+		if i == m.cursor {
+			line = "\x1b[7m" + line + strings.Repeat(" ", max(0, inner-ansi.StringWidth(line))) + "\x1b[0m"
+		}
+		list = append(list, line)
 	}
-	b.WriteString(strings.Repeat("─", max(0, m.width)) + "\n")
 
-	if previewH > 0 {
-		writeClipped(&b, m.previewLines(), m.offset, previewH)
+	// Preview window: scrolled and clipped, every line truncated and
+	// color-reset so git's ANSI can't run into the border.
+	lines := m.previewLines()
+	off := min(m.offset, max(0, len(lines)-previewH))
+	var prev []string
+	for _, l := range lines[off:min(off+previewH, len(lines))] {
+		prev = append(prev, ansi.Truncate(l, inner, "…")+"\x1b[0m")
+	}
+
+	listBox, prevBox := boxFocused, boxBlurred
+	if m.focusDiff {
+		listBox, prevBox = boxBlurred, boxFocused
 	}
 
 	var footer string
 	switch {
 	case m.confirming:
-		footer = "\x1b[7m" + fmt.Sprintf(m.confirm, shortID(m.items[m.cursor].ID)) + "\x1b[0m"
+		footer = styleAsk.Render(fmt.Sprintf(m.confirm, shortID(m.items[m.cursor].ID)))
 	case m.focusDiff:
-		footer = fmt.Sprintf("%d/%d  ↑↓ scroll · esc back to list · r restore · q quit", m.cursor+1, len(m.items))
+		footer = styleFooter.Render(fmt.Sprintf("%d/%d  ↑↓ scroll · esc back to list · r restore · q quit", m.cursor+1, len(m.items)))
 	default:
-		footer = fmt.Sprintf("%d/%d  ↑↓ move · enter read diff · r restore · q quit", m.cursor+1, len(m.items))
+		footer = styleFooter.Render(fmt.Sprintf("%d/%d  ↑↓ move · enter read diff · r restore · q quit", m.cursor+1, len(m.items)))
 	}
-	b.WriteString("\n" + footer)
-	return b.String()
+
+	return ansi.Truncate(styleTitle.Render(m.title), m.width, "…") + "\n" +
+		listBox.Width(inner).Height(listH).Render(strings.Join(list, "\n")) + "\n" +
+		prevBox.Width(inner).Height(previewH).Render(strings.Join(prev, "\n")) + "\n" +
+		footer
+}
+
+// layout splits the window: one line each for title and footer, two border
+// rows per box, and the rest is content — the list gets ~30% of it (never
+// more rows than items), the preview fills the remainder, so the two boxes
+// always fill the window together.
+func (m *pickModel) layout() (listH, previewH int) {
+	budget := max(2, m.height-6)
+	listH = min(len(m.items), max(3, budget*3/10))
+	listH = max(1, min(listH, budget-1))
+	previewH = budget - listH
+	return
 }
 
 // previewLines fetches (and caches) the preview under the cursor, split
@@ -177,10 +211,9 @@ func (m *pickModel) previewLines() []string {
 	return strings.Split(p, "\n")
 }
 
-// previewH mirrors View's layout math so Update can clamp scrolling.
 func (m *pickModel) previewH() int {
-	listH := max(3, min(len(m.items), m.height/3))
-	return m.height - listH - 3
+	_, previewH := m.layout()
+	return previewH
 }
 
 func (m *pickModel) scroll(delta int) {
@@ -193,15 +226,4 @@ func shortID(id string) string {
 		return id[:7]
 	}
 	return id
-}
-
-func writeClipped(b *strings.Builder, lines []string, offset, maxLines int) {
-	if offset > len(lines) {
-		offset = len(lines)
-	}
-	lines = lines[offset:]
-	if len(lines) > maxLines {
-		lines = lines[:maxLines]
-	}
-	b.WriteString(strings.Join(lines, "\n"))
 }
