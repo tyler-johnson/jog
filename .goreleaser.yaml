@@ -26,5 +26,32 @@ checksum:
 changelog:
   use: git
 
+# Formula bump into the tap on every release. Cross-repo push needs its
+# own token (the workflow's GITHUB_TOKEN is scoped to this repo): a
+# fine-grained PAT with contents:write on homebrew-tap, stored as the
+# HOMEBREW_TAP_GITHUB_TOKEN secret.
+brews:
+  - repository:
+      owner: tyler-johnson
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+    directory: Formula
+    homepage: https://github.com/tyler-johnson/jog
+    description: "Memory for your working tree - automatic git snapshots, jj-style"
+    license: MIT
+    commit_msg_template: "jog {{ .Tag }}"
+    install: |
+      bin.install "jog"
+    test: |
+      system bin/"jog", "version"
+    caveats: |
+      jog only snapshots when something invokes it. Wire the triggers:
+
+        1. Shell alias (bash/zsh):  alias git='jog git'
+        2. Agent hooks + skills:    jog agents install
+        3. Editor save hooks:       jog editors install <editor>
+
+      Then verify with:  jog doctor
+
 release:
   draft: false
