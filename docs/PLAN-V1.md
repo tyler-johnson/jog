@@ -347,7 +347,10 @@ property tests.
 - [ ] v0 exit checklist fully closed (accrual week + README stranger test)
 - [ ] `doctor` green on ≥ 2 real repos *(green on both since 2026-08-08)*;
       at least one real misconfiguration caught during dogfood (manufacture
-      one if none occurs naturally)
+      one if none occurs naturally) *(2026-08-09: on the fresh brew
+      machine, doctor correctly flagged everything unwired pre-setup —
+      field evidence it works, but a pre-setup machine isn't a
+      misconfiguration; leaving open for a real config-level catch)*
 - [ ] Manual `trim` run on ≥ 2 real repos for ≥ 2 weeks: object counts
       shrink, every post-trim `back`/`since`/`pick` still correct, zero
       "needed a snapshot trim dropped" events → only then does the

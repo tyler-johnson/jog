@@ -213,7 +213,7 @@ func (d *doctor) checkTriggers(repo *gitx.Repo) {
 		}
 	}
 	if !hooks {
-		d.info("claude hooks", "not wired — `jog hook claude install` sets them up")
+		d.info("claude hooks", "not wired (optional — `jog hook claude install`)")
 	}
 
 	switch {
@@ -222,7 +222,7 @@ func (d *doctor) checkTriggers(repo *gitx.Repo) {
 	case top != "" && fileExists(filepath.Join(top, ".claude", "skills", "jog", "SKILL.md")):
 		d.ok("claude skill", "installed at .claude/skills/jog/SKILL.md (project)")
 	default:
-		d.info("claude skill", "not installed — `jog skill claude install` teaches agents the recovery workflow")
+		d.info("claude skill", "not installed (optional — `jog skill claude install`)")
 	}
 
 	aliasFile := ""
