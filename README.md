@@ -137,12 +137,15 @@ jog integrates with every supported client at two surfaces:
 | Gemini CLI | `~/.gemini/settings.json` | `~/.gemini/skills/jog/` |
 | OpenCode | plugin at `~/.config/opencode/plugins/jog.js` | `~/.config/opencode/skills/jog/` |
 
-Every hook is a thin `jog hook <client>` adapter: it exits in
-milliseconds outside git repos and always exits 0, so a broken setup can
-never block a tool call. Where the client's hook protocol can inject
-context (Claude Code, Codex, Gemini, OpenCode), jog also introduces
-itself once per session — one line saying snapshots are live and how to
-restore.
+The installed hook:
+
+- snapshots the working tree before every prompt and every mutating
+  tool call
+- introduces jog to the agent once per session — one line saying
+  snapshots are live and how to restore (on the clients that support
+  injecting context: Claude Code, Codex, Gemini, OpenCode)
+- can never block the agent: it always exits 0, and exits in
+  milliseconds outside git repos
 
 ```sh
 jog agents install     # both surfaces, every client found on this machine
@@ -150,18 +153,13 @@ jog agents list        # every supported client and what's installed
 jog agents uninstall   # removes exactly what install wrote
 ```
 
-Name a surface or a client to narrow any of them (`jog agents install
-hooks claude`). `--project` scopes the wiring to the current repo instead
-of the home directory — some clients keep project hooks in a personal,
-uncommitted file (Claude's `.claude/settings.local.json`, Copilot's
-`.github/copilot/settings.local.json`); the rest are committable, and a
-committed hook only works for teammates who also have jog installed.
+Everything installs globally, so one wiring covers every repo — pass
+`--project` to scope it to the current repo instead.
 
-Install is additive and careful: existing JSON fields are preserved,
-malformed JSON is never rewritten, uninstall refuses to delete a skill
-file carrying local edits, and if jog isn't on PATH for non-interactive
-shells the hook is written with an absolute path (and says so). The
-install output prints every path it touched.
+> [!NOTE]
+> Install is additive: existing config fields are preserved, malformed
+> JSON is never rewritten, and uninstall refuses to delete a skill file
+> carrying local edits. The install output prints every path it touched.
 
 ## Usage
 
