@@ -898,6 +898,10 @@ func TestSkill(t *testing.T) {
 	if code != 0 || !strings.Contains(stdout, "installed") {
 		t.Fatalf("install: code=%d\n%s", code, stdout)
 	}
+	// Symmetry with hook install: the way out is printed on the way in.
+	if !strings.Contains(stdout, "uninstall") {
+		t.Errorf("install output doesn't mention uninstall:\n%s", stdout)
+	}
 	b, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)

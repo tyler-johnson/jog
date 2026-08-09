@@ -96,6 +96,7 @@ func skillInstall(path string, project bool) int {
 		fmt.Println("  (project-scoped: commit it and teammates' agents get it too)")
 	}
 	fmt.Println("Claude Code picks it up automatically; new sessions can use it immediately.")
+	fmt.Println("`jog skill claude uninstall` removes it.")
 	return 0
 }
 
