@@ -18,15 +18,17 @@ import (
 //go:embed skill.md
 var agentSkill []byte
 
-func installSkillFile(path string) (string, bool, error) {
+// installManagedFile writes a file jog owns (the skill, OpenCode's plugin)
+// and reports what happened.
+func installManagedFile(path string, content []byte) (string, bool, error) {
 	existing, rerr := os.ReadFile(path)
-	if rerr == nil && bytes.Equal(existing, agentSkill) {
+	if rerr == nil && bytes.Equal(existing, content) {
 		return "already up to date — " + path, false, nil
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return "", false, err
 	}
-	if err := os.WriteFile(path, agentSkill, 0o644); err != nil {
+	if err := os.WriteFile(path, content, 0o644); err != nil {
 		return "", false, err
 	}
 	if rerr == nil {
@@ -35,9 +37,9 @@ func installSkillFile(path string) (string, bool, error) {
 	return "installed — " + path, true, nil
 }
 
-// removeSkillFile removes the skill — unless the file differs from what
+// removeManagedFile removes a jog-owned file — unless it differs from what
 // jog installs, which may mean the user's edits; jog won't delete those.
-func removeSkillFile(path string) (string, bool, error) {
+func removeManagedFile(path string, content []byte) (string, bool, error) {
 	b, err := os.ReadFile(path)
 	if os.IsNotExist(err) {
 		return "not installed — nothing to remove", false, nil
@@ -45,7 +47,7 @@ func removeSkillFile(path string) (string, bool, error) {
 	if err != nil {
 		return "", false, err
 	}
-	if !bytes.Equal(b, agentSkill) {
+	if !bytes.Equal(b, content) {
 		return "", false, fmt.Errorf("%s differs from what jog installs — it may carry your edits, so jog won't remove it (delete the file yourself if you mean to)", path)
 	}
 	if err := os.Remove(path); err != nil {

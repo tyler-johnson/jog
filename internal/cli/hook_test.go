@@ -32,9 +32,14 @@ func payload(t *testing.T, fields map[string]any) string {
 
 func hook(t *testing.T, stdin string) string {
 	t.Helper()
+	return hookAs(t, "claude", stdin)
+}
+
+func hookAs(t *testing.T, client, stdin string) string {
+	t.Helper()
 	var out strings.Builder
-	if code := HookClaude(strings.NewReader(stdin), &out); code != 0 {
-		t.Fatalf("HookClaude exited %d — the iron rule is exit 0, always", code)
+	if code := Hook(client, strings.NewReader(stdin), &out); code != 0 {
+		t.Fatalf("Hook(%q) exited %d — the iron rule is exit 0, always", client, code)
 	}
 	return out.String()
 }
@@ -165,6 +170,188 @@ func TestHookSessionNotice(t *testing.T) {
 	}))
 	if out != "" {
 		t.Errorf("PreToolUse: stdout is not context-injected, want empty, got %q", out)
+	}
+}
+
+// Cursor speaks its own dialect: conversation_id for the session,
+// workspace_roots for the repo, and permission events that get an
+// explicit allow — even when the snapshot path fails.
+func TestHookCursor(t *testing.T) {
+	tr := setup(t)
+	tr.Write("b.txt", "change\n")
+	out := hookAs(t, "cursor", payload(t, map[string]any{
+		"hook_event_name": "beforeShellExecution",
+		"conversation_id": "cur-conv-99",
+		"workspace_roots": []string{tr.Dir},
+		"command":         "rm -rf src",
+	}))
+	if out != "{\"permission\":\"allow\"}\n" {
+		t.Errorf("beforeShellExecution response = %q", out)
+	}
+	if got := subject(tr); got != "cursor[cur-conv]: sh(rm -rf src)" {
+		t.Errorf("subject = %q", got)
+	}
+
+	tr.Write("b.txt", "edited\n")
+	out = hookAs(t, "cursor", payload(t, map[string]any{
+		"hook_event_name": "afterFileEdit",
+		"conversation_id": "cur-conv-99",
+		"workspace_roots": []string{tr.Dir},
+		"file_path":       filepath.Join(tr.Dir, "b.txt"),
+	}))
+	if out != "" {
+		t.Errorf("afterFileEdit takes no answer, got %q", out)
+	}
+	if got := subject(tr); got != "cursor[cur-conv]: edit(b.txt)" {
+		t.Errorf("subject = %q", got)
+	}
+
+	// Prompt submission: the continue ack, and no notice — Cursor has no
+	// context injection at this event.
+	tr.Write("b.txt", "prompted\n")
+	out = hookAs(t, "cursor", payload(t, map[string]any{
+		"hook_event_name": "beforeSubmitPrompt",
+		"conversation_id": "cur-conv-99",
+		"workspace_roots": []string{tr.Dir},
+		"prompt":          "fix it",
+	}))
+	if out != "{\"continue\":true}\n" {
+		t.Errorf("beforeSubmitPrompt response = %q", out)
+	}
+
+	// The allow must survive the failure paths: outside any repo.
+	out = hookAs(t, "cursor", payload(t, map[string]any{
+		"hook_event_name": "beforeShellExecution",
+		"workspace_roots": []string{t.TempDir()},
+		"command":         "ls",
+	}))
+	if out != "{\"permission\":\"allow\"}\n" {
+		t.Errorf("failure-path response = %q", out)
+	}
+}
+
+// Gemini shares Claude's payload shape but its stdout must be a single
+// JSON document: the once-per-session notice arrives as BeforeAgent
+// additionalContext, and every other event stays silent.
+func TestHookGemini(t *testing.T) {
+	tr := setup(t)
+	tr.Write("b.txt", "change\n")
+	out := hookAs(t, "gemini", payload(t, map[string]any{
+		"hook_event_name": "BeforeTool",
+		"session_id":      "gem-sess-1",
+		"cwd":             tr.Dir,
+		"tool_name":       "run_shell_command",
+		"tool_input":      map[string]any{"command": "make deploy"},
+	}))
+	if out != "" {
+		t.Errorf("BeforeTool must stay silent, got %q", out)
+	}
+	if got := subject(tr); got != "gemini[gem-sess]: run_shell_command(make deploy)" {
+		t.Errorf("subject = %q", got)
+	}
+
+	tr.Write("b.txt", "prompted\n")
+	out = hookAs(t, "gemini", payload(t, map[string]any{
+		"hook_event_name": "BeforeAgent",
+		"session_id":      "gem-sess-1",
+		"cwd":             tr.Dir,
+		"prompt":          "refactor",
+	}))
+	var notice struct {
+		HookSpecificOutput struct {
+			AdditionalContext string `json:"additionalContext"`
+		} `json:"hookSpecificOutput"`
+	}
+	if err := json.Unmarshal([]byte(out), &notice); err != nil {
+		t.Fatalf("BeforeAgent stdout is not one JSON document: %v\n%s", err, out)
+	}
+	if !strings.Contains(notice.HookSpecificOutput.AdditionalContext, "[jog]") {
+		t.Errorf("notice not in additionalContext: %q", out)
+	}
+
+	tr.Write("b.txt", "again\n")
+	out = hookAs(t, "gemini", payload(t, map[string]any{
+		"hook_event_name": "BeforeAgent",
+		"session_id":      "gem-sess-1",
+		"cwd":             tr.Dir,
+		"prompt":          "again",
+	}))
+	if out != "" {
+		t.Errorf("same session again: want silence, got %q", out)
+	}
+}
+
+// OpenCode's plugin pipes its events here and forwards non-empty stdout
+// into the model's context, so chat.message carries the plain notice.
+func TestHookOpencode(t *testing.T) {
+	tr := setup(t)
+	tr.Write("b.txt", "change\n")
+	out := hookAs(t, "opencode", payload(t, map[string]any{
+		"hook_event_name": "tool.execute.before",
+		"session_id":      "oc-sess-1",
+		"cwd":             tr.Dir,
+		"tool_name":       "bash",
+		"tool_input":      map[string]any{"command": "rm -rf ."},
+	}))
+	if out != "" {
+		t.Errorf("tool.execute.before must stay silent, got %q", out)
+	}
+	if got := subject(tr); got != "opencode[oc-sess-]: bash(rm -rf .)" {
+		t.Errorf("subject = %q", got)
+	}
+
+	tr.Write("b.txt", "prompted\n")
+	out = hookAs(t, "opencode", payload(t, map[string]any{
+		"hook_event_name": "chat.message",
+		"session_id":      "oc-sess-1",
+		"cwd":             tr.Dir,
+		"prompt":          "help me",
+	}))
+	if !strings.Contains(out, "[jog]") {
+		t.Errorf("first chat.message: want notice, got %q", out)
+	}
+	if got := subject(tr); got != `opencode[oc-sess-]: prompt "help me"` {
+		t.Errorf("subject = %q", got)
+	}
+}
+
+// Copilot's Claude-compatible mode sends Claude-shaped payloads; its
+// prompt-submit stdout is ignored by the client, so jog stays silent.
+func TestHookCopilot(t *testing.T) {
+	tr := setup(t)
+	tr.Write("b.txt", "change\n")
+	out := hookAs(t, "copilot", payload(t, map[string]any{
+		"hook_event_name": "PreToolUse",
+		"session_id":      "cop-sess-1",
+		"cwd":             tr.Dir,
+		"tool_name":       "Bash",
+		"tool_input":      map[string]any{"command": "npm test"},
+	}))
+	if out != "" {
+		t.Errorf("PreToolUse must stay silent, got %q", out)
+	}
+	if got := subject(tr); got != "copilot[cop-sess]: Bash(npm test)" {
+		t.Errorf("subject = %q", got)
+	}
+
+	tr.Write("b.txt", "prompted\n")
+	out = hookAs(t, "copilot", payload(t, map[string]any{
+		"hook_event_name": "UserPromptSubmit",
+		"session_id":      "cop-sess-1",
+		"cwd":             tr.Dir,
+		"prompt":          "ship it",
+	}))
+	if out != "" {
+		t.Errorf("copilot gets no notice (stdout is not injected), got %q", out)
+	}
+}
+
+// An unknown adapter name still exits 0: it may be wired by a newer jog,
+// and a hook must never block the user's action.
+func TestHookUnknownAdapter(t *testing.T) {
+	var out strings.Builder
+	if code := Hook("clippy", strings.NewReader("{}"), &out); code != 0 {
+		t.Errorf("unknown adapter exited %d", code)
 	}
 }
 

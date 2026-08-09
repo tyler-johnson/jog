@@ -252,6 +252,22 @@ invokes `jog hook codex`. Non-managed Codex hooks must be reviewed with
 `/hooks` before they run. At project scope Codex uses `.codex/hooks.json`;
 its recovery skill is discovered from `.agents/skills/jog/SKILL.md`.
 
+The other clients follow the same two boundaries in their own dialects, each
+with its own `jog hook <client>` adapter (registry in internal/agents; one
+declaration file per client). Copilot wires through its documented
+Claude-compatible PascalCase mode in `~/.copilot/settings.json` — note its
+`preToolUse` is fail-closed, so the exit-0 iron rule is load-bearing there.
+Gemini wires `BeforeAgent`/`BeforeTool` in `~/.gemini/settings.json` (each
+entry carries a `name` for its hook-trust fingerprinting; hook stdout must be
+a single JSON document, so the session notice ships as `additionalContext`).
+Cursor uses its own flat `~/.cursor/hooks.json` schema
+(`beforeShellExecution`/`afterFileEdit`/`beforeSubmitPrompt`); its permission
+events are answered with an explicit allow. OpenCode has no declarative
+hooks, so install writes an embedded plugin
+(`~/.config/opencode/plugins/jog.js`) that pipes `chat.message` and
+`tool.execute.before` to `jog hook opencode` and forwards the notice into
+the model's context.
+
 ### git alias (secondary — the human) and `jog` bare (deliberate checkpoints)
 
 Covered in §5. Optional future adapters (same engine, no design change): zsh

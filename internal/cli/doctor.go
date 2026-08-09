@@ -74,11 +74,11 @@ type doctor struct {
 	fixable  int
 }
 
-func (d *doctor) ok(what, detail string)   { fmt.Printf("  ok    %-13s %s\n", what, detail) }
-func (d *doctor) info(what, detail string) { fmt.Printf("  info  %-13s %s\n", what, detail) }
+func (d *doctor) ok(what, detail string)   { fmt.Printf("  ok    %-14s %s\n", what, detail) }
+func (d *doctor) info(what, detail string) { fmt.Printf("  info  %-14s %s\n", what, detail) }
 func (d *doctor) warn(what, detail string) {
 	d.findings++
-	fmt.Printf("  WARN  %-13s %s\n", what, detail)
+	fmt.Printf("  WARN  %-14s %s\n", what, detail)
 }
 
 func (d *doctor) checkRepo(repo *gitx.Repo, fix bool) {
@@ -191,9 +191,17 @@ func (d *doctor) checkTriggers() {
 
 	// Wherever the user chose to wire — user or project scope — doctor
 	// should find it. Every registered client is checked, so a new client
-	// in internal/agents shows up here without doctor changing.
+	// in internal/agents shows up here without doctor changing. Clients
+	// with no jog integration at all collapse into one line: their absence
+	// is unremarkable, and six clients' worth of "not installed" would
+	// bury the findings that matter.
 	hooks := false
+	absent := 0
 	for _, s := range agents.Statuses() {
+		if s.HooksLocation == "" && s.SkillLocation == "" {
+			absent++
+			continue
+		}
 		if s.HooksLocation != "" {
 			d.ok(s.Name+" hooks", "`jog hook "+s.Name+"` wired in "+s.HooksLocation)
 			hooks = true
@@ -205,6 +213,9 @@ func (d *doctor) checkTriggers() {
 		} else {
 			d.info(s.Name+" skill", "not installed (optional — `jog agents install`)")
 		}
+	}
+	if absent > 0 {
+		d.info("agent clients", fmt.Sprintf("%d more supported, not integrated (optional — `jog agents install`)", absent))
 	}
 
 	aliasFile := ""

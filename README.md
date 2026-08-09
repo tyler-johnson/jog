@@ -50,9 +50,10 @@ Pick the pitch that fits how you work:
 - Snapshots are **command-triggered, causally before the command runs** — the
   only ordering that protects against `reset --hard` and `checkout -f`. No
   daemon, no filesystem watcher, no git hooks to install or break.
-- Three triggers: the shell alias (every git command you type), Claude Code
-  or Codex hooks (every prompt and mutating tool call), and `jog` itself
-  (deliberate checkpoints). A no-op snapshot costs a few tens of milliseconds.
+- Three triggers: the shell alias (every git command you type), agent hooks —
+  Claude Code, Codex, Copilot, Cursor, Gemini CLI, OpenCode — before every
+  prompt and mutating tool call, and `jog` itself (deliberate checkpoints).
+  A no-op snapshot costs a few tens of milliseconds.
 - jog never reimplements a git verb, and never touches your index, HEAD,
   branches, or config. If jog vanished tomorrow, stock git reads every
   snapshot ([see below](#no-lock-in)).
@@ -100,8 +101,9 @@ jog agents install   # hooks + skill for every agent client on this machine
 
 One command, two surfaces per client: hooks (snapshot before every prompt
 and tool call) and a skill (teaches the agent the recovery workflow).
-`jog agents list` shows every supported client — Claude Code and Codex — and
-what's installed; clients not found on the machine are skipped.
+`jog agents list` shows every supported client — Claude Code, Codex,
+Copilot CLI, Cursor, Gemini CLI, and OpenCode — and what's installed;
+clients not found on the machine are skipped.
 
 For Claude Code, the hooks land in user-level `~/.claude/settings.json` —
 one wiring covers every repo; the hook exits in milliseconds outside git
@@ -122,25 +124,31 @@ yourself if you prefer):
 }
 ```
 
-For Codex, install writes the equivalent events to `~/.codex/hooks.json`
-using the `jog hook codex` adapter and installs the skill at
-`~/.agents/skills/jog/SKILL.md`. Codex requires non-managed hooks to be
-reviewed before they run; open `/hooks` after installation and trust the
-jog entries.
+Every other client gets the equivalent wiring in its own config dialect
+and its own `jog hook <client>` adapter: Codex in `~/.codex/hooks.json`
+(review with `/hooks` — Codex requires trusting non-managed hooks before
+they run), Copilot in `~/.copilot/settings.json`, Gemini in
+`~/.gemini/settings.json`, Cursor in its own `~/.cursor/hooks.json`
+format (read by both the IDE and the CLI), and OpenCode as a small plugin
+at `~/.config/opencode/plugins/jog.js`. Skills install to each client's
+own skills directory. The install output prints every path it touched.
 
 (If jog isn't on PATH for non-interactive shells, install writes the
 absolute path instead — and tells you so.)
 
-`--project` scopes the command to the current repo. Claude hooks go to the
-personal `.claude/settings.local.json` and its skill to `.claude/skills/`.
-Codex uses the committable `.codex/hooks.json` and `.agents/skills/`; each
-Codex user must review project hooks with `/hooks`. `jog agents uninstall`
-removes exactly what install wrote and touches nothing else.
+`--project` scopes the command to the current repo instead of the home
+directory. Some clients keep project hooks in a personal, uncommitted
+file (Claude's `.claude/settings.local.json`, Copilot's
+`.github/copilot/settings.local.json`); the rest are committable — and a
+committed hook only works for teammates who also have jog installed.
+`jog agents uninstall` removes exactly what install wrote and touches
+nothing else.
 
-Once the hooks are wired, jog introduces itself to the agent once per session
-— a single line of context saying snapshots are live and how to restore —
-so it knows the safety net exists exactly when it's active. Each client's
-installed skill goes further and teaches the full recovery workflow.
+Once the hooks are wired, jog introduces itself to the agent once per
+session — a single line of context saying snapshots are live and how to
+restore — on the clients whose hook protocol can inject context (Claude
+Code, Codex, Gemini, OpenCode). Each client's installed skill goes further
+and teaches the full recovery workflow.
 
 **4. Verify:** make any change in a repo, run `git status`, then `jog snaps`
 — you should see a `pre: git status` entry.
@@ -307,8 +315,9 @@ Native `git config` keys — global or per-repo, no new file format:
 ## Roadmap
 
 - **shipped:** snapshot engine, `snaps` (+ `--all` forest view), `since`,
-  `back`, `pick`, `trim` + tapering retention, `doctor`, Claude Code and
-  Codex integration (hooks, agent skills, once-per-session notice), brew tap.
+  `back`, `pick`, `trim` + tapering retention, `doctor`, agent integrations
+  for Claude Code, Codex, Copilot, Cursor, Gemini CLI, and OpenCode (hooks,
+  agent skills, once-per-session notice), brew tap.
 - **next:** automatic trim (piggybacked, at most daily — after the manual
   command has earned trust), MCP server (agents query their own snapshot
   history), optional encrypted backup push of `refs/jog/*` to a private

@@ -20,16 +20,25 @@ import (
 
 // client declares one supported agent client: its hook events, where each
 // surface lives per scope, and how wiring is located for list and doctor.
+// Every func field except hooksPath and skillPath is optional — nil means
+// the shared default (convention detection, Claude-style JSON wiring,
+// location derived from the paths). Clients whose hook config is not the
+// Claude-style JSON (Cursor's flat hooks.json, OpenCode's plugin file)
+// override hooksInstall/hooksUninstall/hooksLocation wholesale.
 type client struct {
-	name          string
-	hookEvents    []hookEvent
-	installNote   string // client-specific coda for the wired message
-	hooksPath     func(project bool) (string, error)
-	hooksLocation func() string // "" when not wired anywhere
-	skillPath     func(project bool) (string, error)
+	name           string
+	detect         func() bool // nil: binary `name` on PATH, or ~/.<name> exists
+	hookEvents     []hookEvent
+	hookExtras     map[string]any // extra fields each written hook entry carries
+	installNote    string         // client-specific coda for the wired message
+	hooksPath      func(project bool) (string, error)
+	hooksInstall   func(project bool) (string, bool, error)
+	hooksUninstall func(project bool) (string, bool, error)
+	hooksLocation  func() string // "" when not wired anywhere
+	skillPath      func(project bool) (string, error)
 }
 
-var clients = []client{claudeAgent, codexAgent}
+var clients = []client{claudeAgent, codexAgent, copilotAgent, cursorAgent, geminiAgent, opencodeAgent}
 
 // Status is one client's wiring, as doctor reports it.
 type Status struct {
@@ -42,16 +51,17 @@ type Status struct {
 func Statuses() []Status {
 	out := make([]Status, len(clients))
 	for i, c := range clients {
-		out[i] = Status{Name: c.name, HooksLocation: c.hooksLocation(), SkillLocation: c.skillLocation()}
+		out[i] = Status{Name: c.name, HooksLocation: c.whereHooks(), SkillLocation: c.skillLocation()}
 	}
 	return out
 }
 
-// detected reports whether the client is plausibly on this machine: its
-// CLI on PATH, or its config directory in the home directory. Both
-// current clients follow the `<name>` / `~/.<name>` convention; a future
-// client that doesn't will need this to become a per-client field.
+// detected reports whether the client is plausibly on this machine — by
+// default its CLI on PATH, or its config directory in the home directory.
 func (c client) detected() bool {
+	if c.detect != nil {
+		return c.detect()
+	}
 	if _, err := exec.LookPath(c.name); err == nil {
 		return true
 	}
@@ -59,7 +69,10 @@ func (c client) detected() bool {
 	return err == nil && fileExists(filepath.Join(home, "."+c.name))
 }
 
-func (c client) hooksInstall(project bool) (string, bool, error) {
+func (c client) installHooks(project bool) (string, bool, error) {
+	if c.hooksInstall != nil {
+		return c.hooksInstall(project)
+	}
 	path, err := c.hooksPath(project)
 	if err != nil {
 		return "", false, err
@@ -69,7 +82,7 @@ func (c client) hooksInstall(project bool) (string, bool, error) {
 		return "", false, err
 	}
 	cmd := hookCommand(c.name)
-	added, err := wireHooks(m, cmd, c.name, c.hookEvents)
+	added, err := wireHooks(m, cmd, c.name, c.hookEvents, c.hookExtras)
 	if err != nil {
 		return "", false, err
 	}
@@ -83,7 +96,10 @@ func (c client) hooksInstall(project bool) (string, bool, error) {
 		" (command: " + cmd + c.installNote + ")", true, nil
 }
 
-func (c client) hooksUninstall(project bool) (string, bool, error) {
+func (c client) uninstallHooks(project bool) (string, bool, error) {
+	if c.hooksUninstall != nil {
+		return c.hooksUninstall(project)
+	}
 	path, err := c.hooksPath(project)
 	if err != nil {
 		return "", false, err
@@ -105,20 +121,35 @@ func (c client) hooksUninstall(project bool) (string, bool, error) {
 	return fmt.Sprintf("removed %d jog hook(s) from %s — everything else untouched", removed, path), true, nil
 }
 
-func (c client) skillInstall(project bool) (string, bool, error) {
-	path, err := c.skillPath(project)
-	if err != nil {
-		return "", false, err
+// whereHooks reports where the client's hooks are wired — user scope
+// first, then the current repo — or "" when they aren't.
+func (c client) whereHooks() string {
+	if c.hooksLocation != nil {
+		return c.hooksLocation()
 	}
-	return installSkillFile(path)
+	if p, err := c.hooksPath(false); err == nil && hooksFileWired(p, c.name) {
+		return tildePath(p)
+	}
+	if p, err := c.hooksPath(true); err == nil && hooksFileWired(p, c.name) {
+		return projectPathDisplay(p)
+	}
+	return ""
 }
 
-func (c client) skillUninstall(project bool) (string, bool, error) {
+func (c client) installSkill(project bool) (string, bool, error) {
 	path, err := c.skillPath(project)
 	if err != nil {
 		return "", false, err
 	}
-	return removeSkillFile(path)
+	return installManagedFile(path, agentSkill)
+}
+
+func (c client) uninstallSkill(project bool) (string, bool, error) {
+	path, err := c.skillPath(project)
+	if err != nil {
+		return "", false, err
+	}
+	return removeManagedFile(path, agentSkill)
 }
 
 // skillLocation reports where the skill is installed — user scope first,
@@ -224,7 +255,7 @@ func list(targets []client, hooks, skill bool) int {
 	for _, c := range targets {
 		found := c.detected()
 		if hooks {
-			switch loc := c.hooksLocation(); {
+			switch loc := c.whereHooks(); {
 			case loc != "":
 				row(c.name, "hooks", "installed — "+loc)
 			case !found:
@@ -259,7 +290,7 @@ func install(targets []client, explicit, hooks, skill, project bool) int {
 			continue
 		}
 		if hooks {
-			msg, did, err := c.hooksInstall(project)
+			msg, did, err := c.installHooks(project)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "jog: %s hooks: %v\n", c.name, err)
 				code = 1
@@ -269,7 +300,7 @@ func install(targets []client, explicit, hooks, skill, project bool) int {
 			}
 		}
 		if skill {
-			msg, did, err := c.skillInstall(project)
+			msg, did, err := c.installSkill(project)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "jog: %s skill: %v\n", c.name, err)
 				code = 1
@@ -282,9 +313,9 @@ func install(targets []client, explicit, hooks, skill, project bool) int {
 	if changed {
 		fmt.Println("`jog agents uninstall` removes them; `jog doctor` verifies the wiring.")
 		if project {
-			fmt.Println("(project scope: Claude settings.local.json is personal; Codex's")
-			fmt.Println(" .codex/hooks.json and both clients' skill directories are committable.")
-			fmt.Println(" Codex users review project hooks with /hooks before they run.)")
+			fmt.Println("(project scope: a committed hook file only works for teammates who")
+			fmt.Println(" also have jog installed; some clients keep hooks in a personal,")
+			fmt.Println(" uncommitted file instead — the paths above show which.)")
 		}
 	}
 	return code
@@ -294,7 +325,7 @@ func uninstall(targets []client, hooks, skill, project bool) int {
 	code := 0
 	for _, c := range targets {
 		if hooks {
-			msg, _, err := c.hooksUninstall(project)
+			msg, _, err := c.uninstallHooks(project)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "jog: %s hooks: %v\n", c.name, err)
 				code = 1
@@ -303,7 +334,7 @@ func uninstall(targets []client, hooks, skill, project bool) int {
 			}
 		}
 		if skill {
-			msg, _, err := c.skillUninstall(project)
+			msg, _, err := c.uninstallSkill(project)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "jog: %s skill: %v\n", c.name, err)
 				code = 1

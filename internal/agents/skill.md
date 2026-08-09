@@ -40,8 +40,8 @@ That labeled entry becomes the obvious restore point if things go sideways.
 - Never tell a user their uncommitted work is unrecoverable without
   checking `jog snaps <path>` first.
 - Timeline entries name the command a snapshot ran *ahead of*, never who
-  made the changes. `claude[…]` and `codex[…]` entries are prompt/tool-call
-  boundaries from those agent sessions.
+  made the changes. Agent-prefixed entries (`claude[…]`, `codex[…]`,
+  `cursor[…]`, …) are prompt/tool-call boundaries from agent sessions.
 - jog never touches the index, HEAD, branches, or config. `jog back` is
   the only jog command that writes the worktree, and it is snapshotted
   first — reading the timeline is always safe.

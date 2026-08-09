@@ -30,7 +30,7 @@ usage:
   jog back <path> [--at T]  restore one file from a snapshot
   jog back --all --at T     restore the whole working tree
   jog agents install        hooks + skill for every agent client on this machine (uninstall, list; --project)
-  jog hook claude|codex     agent hook entry point (reads JSON on stdin)
+  jog hook <client>         agent hook entry point (reads JSON on stdin)
   jog git <args>            snapshot, then run the real git command
   jog pick [--all] <path>   scrub through a file's versions and restore one
   jog trim [--dry-run]      apply the retention taper; drop thinned snapshots
@@ -163,17 +163,17 @@ the newest snapshot). Read-only by default; --fix repairs exactly the
 two gc config keys that keep git's gc off jog's history, and nothing
 else. Exits 0 when healthy, 1 with findings.
 `,
-	"hook": `jog hook claude|codex — agent hook entry points
+	"hook": `jog hook <client> — agent hook entry points
 
 usage:
-  jog hook claude    (Claude Code invokes this; JSON payload on stdin)
-  jog hook codex     (Codex invokes this; JSON payload on stdin)
+  jog hook <client>    (the agent client invokes this; JSON payload on stdin)
 
 Snapshots before every prompt and tool call, and always exits 0 — a
-failing hook must never block the user's action. It also introduces jog
-to the agent once per session, one line of context. These are the commands
-` + "`jog agents install`" + ` wires into agent settings; they are not
-meant to be run by hand.
+failing hook must never block the user's action. Where the client allows
+it, jog also introduces itself once per session, one line of context.
+These are the commands ` + "`jog agents install`" + ` wires into each
+client's settings; they are not meant to be run by hand. The client
+names are the ones ` + "`jog agents list`" + ` shows.
 `,
 	"agents": agentsHelp,
 	"agent":  agentsHelp,
@@ -245,24 +245,19 @@ func run(args []string) int {
 	case "back":
 		return cli.Back(args[1:])
 	case "hook":
-		// Pure runtime entries (`jog hook claude|codex`, JSON on stdin) are
-		// the exact commands `jog agents install` wires into settings, so they
+		// Pure runtime entries (`jog hook <client>`, JSON on stdin) are the
+		// exact commands `jog agents install` wires into settings, so they
 		// exit 0 always, even on misconfiguration: a non-zero exit from a
 		// hook blocks the user's tool call or prompt. Management lives
 		// under `jog agents`; humans reaching for it here get a pointer.
 		if len(args) == 2 {
-			switch args[1] {
-			case "claude":
-				return cli.HookClaude(os.Stdin, os.Stdout)
-			case "codex":
-				return cli.HookCodex(os.Stdin, os.Stdout)
-			}
+			return cli.Hook(args[1], os.Stdin, os.Stdout)
 		}
 		if len(args) > 2 {
 			fmt.Fprintln(os.Stderr, "jog: hook management lives under `jog agents` — try `jog agents install`")
 			return 2
 		}
-		fmt.Fprintln(os.Stderr, "jog: unknown hook adapter (want: jog hook claude or jog hook codex)")
+		fmt.Fprintln(os.Stderr, "jog: hook wants a client name — it is wired by `jog agents install`, not run by hand")
 		return 0
 	case "agents", "agent":
 		return agents.Run(args[1:])

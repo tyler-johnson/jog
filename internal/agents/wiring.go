@@ -3,6 +3,7 @@ package agents
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -121,8 +122,10 @@ func writeSettings(path string, m map[string]any) error {
 
 // wireHooks adds the jog hook entries that are missing and reports which
 // events it added. An event already invoking this client's adapter —
-// however the user shaped it — is left exactly alone.
-func wireHooks(m map[string]any, cmd, client string, events []hookEvent) ([]string, error) {
+// however the user shaped it — is left exactly alone. extras are
+// client-specific fields each written entry carries (e.g. Gemini's
+// "name", which its hook-trust fingerprinting requires).
+func wireHooks(m map[string]any, cmd, client string, events []hookEvent, extras map[string]any) ([]string, error) {
 	var hooks map[string]any
 	switch h := m["hooks"].(type) {
 	case nil:
@@ -139,9 +142,9 @@ func wireHooks(m map[string]any, cmd, client string, events []hookEvent) ([]stri
 		if eventInvokesJog(hooks[ev.name], cmd, client) {
 			continue
 		}
-		entry := map[string]any{
-			"hooks": []any{map[string]any{"type": "command", "command": cmd}},
-		}
+		inner := map[string]any{"type": "command", "command": cmd}
+		maps.Copy(inner, extras)
+		entry := map[string]any{"hooks": []any{inner}}
 		if ev.matcher != "" {
 			entry["matcher"] = ev.matcher
 		}

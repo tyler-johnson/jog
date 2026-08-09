@@ -22,23 +22,10 @@ var codexAgent = client{
 		}
 		return homePath(".codex", "hooks.json")
 	},
-	hooksLocation: codexHooksLocation,
 	skillPath: func(project bool) (string, error) {
 		if project {
 			return repoPath(".agents", "skills", "jog", "SKILL.md")
 		}
 		return homePath(".agents", "skills", "jog", "SKILL.md")
 	},
-}
-
-// codexHooksLocation reports where `jog hook codex` is wired — user scope
-// first, then the current repo — or "" when it isn't.
-func codexHooksLocation() string {
-	if p, err := homePath(".codex", "hooks.json"); err == nil && hooksFileWired(p, "codex") {
-		return tildePath(p)
-	}
-	if p, err := repoPath(".codex", "hooks.json"); err == nil && hooksFileWired(p, "codex") {
-		return projectPathDisplay(p)
-	}
-	return ""
 }

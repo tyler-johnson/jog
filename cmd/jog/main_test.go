@@ -1067,7 +1067,7 @@ func TestAgents(t *testing.T) {
 		t.Errorf("list after uninstall:\n%s", stdout)
 	}
 
-	_, stderr, code = runJogEnv(t, dir, env, "agents", "install", "cursor")
+	_, stderr, code = runJogEnv(t, dir, env, "agents", "install", "clippy")
 	if code != 2 || !strings.Contains(stderr, "supported") {
 		t.Errorf("unknown client: code=%d stderr=%q", code, stderr)
 	}
@@ -1174,6 +1174,121 @@ func TestAgentsCodex(t *testing.T) {
 	}
 	if b, _ := os.ReadFile(hooksPath); string(b) != "{not json" {
 		t.Error("malformed Codex hooks file was rewritten")
+	}
+}
+
+// TestAgentsMoreClients: the copilot, cursor, gemini, and opencode
+// integrations — each lands in its own config in its own dialect, is
+// idempotent, and uninstalls surgically.
+func TestAgentsMoreClients(t *testing.T) {
+	home := t.TempDir()
+	for _, d := range []string{".copilot", ".cursor", ".gemini", filepath.Join(".config", "opencode")} {
+		if err := os.MkdirAll(filepath.Join(home, d), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	env := []string{"HOME=" + home, "PATH=/usr/bin:/bin"}
+	dir := t.TempDir()
+
+	// A pre-existing foreign Cursor hook must survive everything below.
+	cursorHooks := filepath.Join(home, ".cursor", "hooks.json")
+	seed := `{"version":1,"hooks":{"beforeShellExecution":[{"command":"echo audit"}]}}`
+	if err := os.WriteFile(cursorHooks, []byte(seed), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	stdout, stderr, code := runJogEnv(t, dir, env, "agents", "install")
+	if code != 0 {
+		t.Fatalf("install: code=%d stderr=%s", code, stderr)
+	}
+	for _, want := range []string{"copilot", "cursor", "gemini", "opencode"} {
+		if !strings.Contains(stdout, want) {
+			t.Errorf("install output missing %q:\n%s", want, stdout)
+		}
+	}
+	if strings.Contains(stdout, "claude hooks") {
+		t.Errorf("undetected claude was installed:\n%s", stdout)
+	}
+
+	// Each client's hook config, in its own dialect.
+	checks := []struct {
+		path string
+		want []string
+	}{
+		{filepath.Join(home, ".copilot", "settings.json"),
+			[]string{"PreToolUse", "UserPromptSubmit", "Bash|Edit|Write", "jog hook copilot"}},
+		{cursorHooks,
+			[]string{"beforeShellExecution", "afterFileEdit", "beforeSubmitPrompt", "jog hook cursor", "echo audit"}},
+		{filepath.Join(home, ".gemini", "settings.json"),
+			[]string{"BeforeAgent", "BeforeTool", "write_file|replace|run_shell_command", `"name": "jog"`, "jog hook gemini"}},
+		{filepath.Join(home, ".config", "opencode", "plugins", "jog.js"),
+			[]string{"jog hook opencode", "tool.execute.before", "chat.message"}},
+	}
+	for _, c := range checks {
+		b, err := os.ReadFile(c.path)
+		if err != nil {
+			t.Fatalf("%s: %v", c.path, err)
+		}
+		for _, want := range c.want {
+			if !strings.Contains(string(b), want) {
+				t.Errorf("%s missing %q:\n%s", c.path, want, b)
+			}
+		}
+	}
+	for _, p := range []string{
+		filepath.Join(home, ".copilot", "skills", "jog", "SKILL.md"),
+		filepath.Join(home, ".cursor", "skills", "jog", "SKILL.md"),
+		filepath.Join(home, ".gemini", "skills", "jog", "SKILL.md"),
+		filepath.Join(home, ".config", "opencode", "skills", "jog", "SKILL.md"),
+	} {
+		if _, err := os.Stat(p); err != nil {
+			t.Errorf("skill missing at %s: %v", p, err)
+		}
+	}
+
+	// Idempotent: everything reports already-done, and the changed-work
+	// footer (which only prints when something was written) stays away.
+	stdout, _, code = runJogEnv(t, dir, env, "agents", "install")
+	if code != 0 || !strings.Contains(stdout, "already wired") ||
+		!strings.Contains(stdout, "already up to date") || strings.Contains(stdout, "jog agents uninstall") {
+		t.Errorf("reinstall not idempotent: code=%d\n%s", code, stdout)
+	}
+
+	stdout, _, code = runJogEnv(t, dir, env, "agents", "list")
+	for _, want := range []string{"~/.copilot/settings.json", "~/.cursor/hooks.json",
+		"~/.gemini/settings.json", "~/.config/opencode/plugins/jog.js"} {
+		if code != 0 || !strings.Contains(stdout, want) {
+			t.Errorf("list missing %q:\n%s", want, stdout)
+		}
+	}
+
+	// Uninstall: jog's entries gone, the foreign Cursor hook untouched.
+	stdout, stderr, code = runJogEnv(t, dir, env, "agents", "uninstall")
+	if code != 0 {
+		t.Fatalf("uninstall: code=%d stderr=%s", code, stderr)
+	}
+	b, err := os.ReadFile(cursorHooks)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(b), "jog hook cursor") || !strings.Contains(string(b), "echo audit") {
+		t.Errorf("cursor uninstall not surgical:\n%s", b)
+	}
+	if _, err := os.Stat(filepath.Join(home, ".config", "opencode", "plugins", "jog.js")); !os.IsNotExist(err) {
+		t.Error("opencode plugin survives uninstall")
+	}
+
+	// An edited opencode plugin is refused, like an edited skill.
+	plugin := filepath.Join(home, ".config", "opencode", "plugins", "jog.js")
+	if err := os.MkdirAll(filepath.Dir(plugin), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(plugin, []byte("// my own plugin\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, stderr, code = runJogEnv(t, dir, env, "agents", "uninstall", "hooks", "opencode")
+	if code != 1 || !strings.Contains(stderr, "differs") {
+		t.Errorf("edited plugin: code=%d stderr=%q", code, stderr)
 	}
 }
 
