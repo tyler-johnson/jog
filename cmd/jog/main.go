@@ -25,7 +25,7 @@ const usage = `jog — a memory for your working tree
 usage:
   jog                       snapshot now
   jog -m "msg"              snapshot with a message
-  jog snaps [path]          timeline of snapshots on this branch (-p: diffs, --all: every branch)
+  jog snaps [path]          browse snapshots on this branch (piped: plain list; -p, -n, --all, --json, --format)
   jog since [T] [path]      what changed since a snapshot (default: last command boundary)
   jog back <path> [--at T]  restore one file from a snapshot
   jog back --all --at T     restore the whole working tree
@@ -71,22 +71,38 @@ refuses to delete a skill file carrying local edits.
 // the README should leave each text knowing what the command does and
 // what it will never do.
 var helpTexts = map[string]string{
-	"snaps": `jog snaps — the timeline of snapshots on this branch
+	"snaps": `jog snaps — browse the timeline of snapshots on this branch
 
 usage:
-  jog snaps [-p] [--all] [path…]
+  jog snaps [-p] [-n <count>] [--all] [--json] [--format=<fmt>] [path…]
 
-Snapshots first (running jog is itself a command boundary), then lists
-the chain: id, age, provenance, and the files each snapshot changed.
+Snapshots first (running jog is itself a command boundary), then opens
+the timeline in an interactive browser: every snapshot with its id, age,
+and provenance, the patch previewed as you move. ↑/↓ or j/k to scrub,
+pgup/pgdn (or ctrl+u/ctrl+d) to scroll the preview, enter to restore the
+tree to that snapshot — after a y/n confirmation — and q to leave
+everything untouched. Restores go through jog back, so they are
+snapshotted first and undoable.
+
 Provenance names the command a snapshot ran ahead of — "pre: git status",
 "claude[…]: Bash(…)", "manual: msg" — never who made the changes.
 
 options:
-  -p, --patch   full patches instead of per-file summaries
-  --all         every branch's chain, interleaved, with a chain column
-  path…         only snapshots that touched these paths
+  -p, --patch     print full patches via git log instead of browsing
+  -n <count>      only the newest <count> snapshots
+  --all           every branch's chain, interleaved, with a chain column
+  --json          the timeline as JSON: id, sha, ISO time, age, chain,
+                  provenance, and each snapshot's files with statuses —
+                  the same bytes on a terminal, piped, or in a script
+  --format=<fmt>  a git log format for the plain printout; nothing extra
+                  is appended, so --format=%h is one line per snapshot
+  path…           only snapshots that touched these paths (a restore then
+                  touches only those paths)
 
-Ids from the first column feed jog back --at <id> and jog since <id>.
+Piped output (and -p) prints the plain git log rendering: id, age,
+provenance, files changed. --json and --format never open the browser,
+so scripts and agents get everything without touching git's refs
+themselves. Ids feed jog back --at <id> and jog since <id>.
 `,
 	"since": `jog since — what changed since a snapshot
 

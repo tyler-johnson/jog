@@ -24,6 +24,10 @@ restored to c0ffee1 (2 minutes ago — pre: git status): 14 restored, 0 deleted
 (undo: jog back --all)
 ```
 
+On a terminal, `jog snaps` opens the timeline as an interactive browser —
+scrub with a live patch preview, enter restores the tree (after a y/n
+confirm). Piped, it prints the plain list shown above.
+
 ## Why jog
 
 Pick the pitch that fits how you work:
@@ -161,7 +165,7 @@ Two disjoint namespaces, one rule: **`jog git` is the only door to git.**
 |---|---|
 | `jog` | snapshot now, show the top of the timeline |
 | `jog -m "msg"` | snapshot with a message (`manual: msg`) |
-| `jog snaps [-p] [--all] [path…]` | the timeline: id, age, provenance, files changed (`-p`: patches, `--all`: every branch, interleaved) |
+| `jog snaps [-p] [-n N] [--all] [--json] [--format=F] [path…]` | browse the timeline — scrub with a patch preview, enter restores after a y/n confirm; piped it prints plainly: id, age, provenance, files changed (`-p`: patches, `-n`: newest N, `--all`: every branch interleaved, `--json`: machine-readable, `--format`: git log format) |
 | `jog since [T] [path…]` | what changed since a snapshot (default: your last command boundary; `-p`: patches) |
 | `jog back <path>… [--at T]` | restore files from a snapshot (worktree only) |
 | `jog back --all [--at T]` | restore the whole tree, including deleting files created since |
@@ -222,6 +226,15 @@ $ jog snaps src/parser/  # just one path's history
 
 ```console
 $ jog pick src/parser/lexer.go
+```
+
+**Script the timeline** — agents and scripts get structure without knowing
+how snapshots map onto git refs:
+
+```console
+$ jog snaps --json -n 5           # newest five: sha, ISO time, provenance, chain, files
+$ jog snaps --json src/ | jq -r '.[].provenance'
+$ jog snaps --format='%h %cI %s'  # any git log format, one entry per line
 ```
 
 **The timeline is getting long.** Apply the retention taper — everything

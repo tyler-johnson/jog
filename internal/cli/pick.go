@@ -76,6 +76,7 @@ func Pick(args []string) int {
 		fmt.Sprintf("versions of %s — enter restores, q leaves everything untouched", path),
 		items,
 		func(id string) string { return versionPreview(repo, id, path) },
+		"", // single file: enter restores instantly, no confirm step
 	)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "jog: %v\n", err)

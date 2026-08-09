@@ -19,8 +19,13 @@ type PickItem struct {
 // RunPick shows a scrollable list with a preview pane and returns the
 // chosen item's ID, or aborted=true when the user backs out (q/esc) —
 // aborting must always be the safe, obvious exit.
-func RunPick(title string, items []PickItem, preview func(id string) string) (id string, aborted bool, err error) {
-	m := pickModel{title: title, items: items, preview: preview, cache: map[int]string{}}
+//
+// confirm, when non-empty, makes enter ask before choosing: it is a
+// fmt template whose single %s receives the highlighted item's short id
+// (e.g. "restore the whole tree to %s? y/n"); y chooses, anything else
+// returns to browsing. Empty means enter chooses instantly.
+func RunPick(title string, items []PickItem, preview func(id string) string, confirm string) (id string, aborted bool, err error) {
+	m := pickModel{title: title, items: items, preview: preview, confirm: confirm, cache: map[int]string{}}
 	out, err := tea.NewProgram(&m, tea.WithAltScreen()).Run()
 	if err != nil {
 		return "", true, err
@@ -36,10 +41,13 @@ type pickModel struct {
 	title   string
 	items   []PickItem
 	preview func(id string) string
+	confirm string
 	cache   map[int]string
 
 	cursor        int
 	chosen        int
+	offset        int // preview scroll, in lines
+	confirming    bool
 	width, height int
 }
 
@@ -53,16 +61,43 @@ func (m *pickModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
 	case tea.KeyMsg:
+		if m.confirming {
+			// Only an explicit y commits; every other key is a safe no.
+			switch msg.String() {
+			case "y", "Y":
+				m.chosen = m.cursor
+				return m, tea.Quit
+			case "ctrl+c":
+				return m, tea.Quit
+			default:
+				m.confirming = false
+			}
+			return m, nil
+		}
 		switch msg.String() {
 		case "up", "k":
 			if m.cursor > 0 {
 				m.cursor--
+				m.offset = 0
 			}
 		case "down", "j":
 			if m.cursor < len(m.items)-1 {
 				m.cursor++
+				m.offset = 0
 			}
+		case "pgdown":
+			m.scroll(m.previewH() - 1)
+		case "pgup":
+			m.scroll(-(m.previewH() - 1))
+		case "ctrl+d":
+			m.scroll(m.previewH() / 2)
+		case "ctrl+u":
+			m.scroll(-(m.previewH() / 2))
 		case "enter":
+			if m.confirm != "" {
+				m.confirming = true
+				return m, nil
+			}
 			m.chosen = m.cursor
 			return m, tea.Quit
 		case "q", "esc", "ctrl+c":
@@ -94,22 +129,54 @@ func (m *pickModel) View() string {
 	}
 	b.WriteString(strings.Repeat("─", max(0, m.width)) + "\n")
 
-	if p, ok := m.cache[m.cursor]; ok || previewH <= 0 {
-		writeClipped(&b, p, previewH)
-	} else {
-		p = m.preview(m.items[m.cursor].ID)
-		m.cache[m.cursor] = p
-		writeClipped(&b, p, previewH)
+	if previewH > 0 {
+		writeClipped(&b, m.previewLines(), m.offset, previewH)
 	}
 
-	b.WriteString(fmt.Sprintf("\n%d/%d  ↑↓ move · enter restore · q quit", m.cursor+1, len(m.items)))
+	footer := fmt.Sprintf("%d/%d  ↑↓ move · pgdn/pgup scroll · enter restore · q quit", m.cursor+1, len(m.items))
+	if m.confirming {
+		footer = "\x1b[7m" + fmt.Sprintf(m.confirm, shortID(m.items[m.cursor].ID)) + "\x1b[0m"
+	}
+	b.WriteString("\n" + footer)
 	return b.String()
 }
 
-func writeClipped(b *strings.Builder, s string, maxLines int) {
-	lines := strings.Split(s, "\n")
+// previewLines fetches (and caches) the preview under the cursor, split
+// into lines — the unit both rendering and scroll clamping work in.
+func (m *pickModel) previewLines() []string {
+	p, ok := m.cache[m.cursor]
+	if !ok {
+		p = m.preview(m.items[m.cursor].ID)
+		m.cache[m.cursor] = p
+	}
+	return strings.Split(p, "\n")
+}
+
+// previewH mirrors View's layout math so Update can clamp scrolling.
+func (m *pickModel) previewH() int {
+	listH := max(3, min(len(m.items), m.height/3))
+	return m.height - listH - 3
+}
+
+func (m *pickModel) scroll(delta int) {
+	maxOff := max(0, len(m.previewLines())-m.previewH())
+	m.offset = max(0, min(m.offset+delta, maxOff))
+}
+
+func shortID(id string) string {
+	if len(id) > 7 {
+		return id[:7]
+	}
+	return id
+}
+
+func writeClipped(b *strings.Builder, lines []string, offset, maxLines int) {
+	if offset > len(lines) {
+		offset = len(lines)
+	}
+	lines = lines[offset:]
 	if len(lines) > maxLines {
-		lines = lines[:max(0, maxLines)]
+		lines = lines[:maxLines]
 	}
 	b.WriteString(strings.Join(lines, "\n"))
 }

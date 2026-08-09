@@ -14,7 +14,10 @@ branches, the index, `git log`, and remotes.
 
 1. Find versions: `jog snaps <path>` — every snapshot that changed the
    path, newest first, with id, age, and the command it ran ahead of.
-   `jog snaps --all <path>` searches every branch's timeline.
+   `jog snaps --all <path>` searches every branch's timeline. Prefer
+   `jog snaps --json [-n N] [path]` when parsing: a JSON array with id,
+   sha, ISO time, provenance, chain, and each snapshot's files with
+   statuses.
 2. Inspect one: `git show <id>:<path>` prints that version;
    `jog since <id> <path>` diffs it against the tree now.
 3. Restore: `jog back <path> --at <id>` — also accepts git time syntax,

@@ -396,6 +396,14 @@ func TestSnaps(t *testing.T) {
 	if strings.Index(stdout, "checkpoint two") > strings.Index(stdout, "checkpoint one") {
 		t.Errorf("timeline not newest-first:\n%s", stdout)
 	}
+	// Piped output stays the plain git log passthrough — ids and provenance
+	// with no ANSI styling; the interactive browser only appears on a TTY.
+	if strings.Contains(stdout, "\x1b[") {
+		t.Errorf("piped snaps output carries ANSI escapes:\n%s", stdout)
+	}
+	if id := tr.Git("rev-parse", "--short", "refs/jog/main"); !strings.Contains(stdout, id) {
+		t.Errorf("piped snaps output missing snapshot id %s:\n%s", id, stdout)
+	}
 
 	// Path filter: only entries touching b.txt.
 	stdout, _, _ = runJog(t, tr.Dir, "snaps", "b.txt")
@@ -415,6 +423,82 @@ func TestSnaps(t *testing.T) {
 	stdout, _, _ = runJog(t, tr.Dir, "snaps")
 	if !strings.Contains(stdout, "pre: jog snaps") {
 		t.Errorf("snaps did not snapshot before reading:\n%s", stdout)
+	}
+}
+
+// The machine outputs: --json is a parseable array carrying everything an
+// agent needs (ids, times, provenance, chain, files) without touching
+// refs/jog/* itself; -n limits; --format hands the rendering to git with
+// nothing appended; incompatible combinations fail loudly.
+func TestSnapsMachineOutput(t *testing.T) {
+	tr := testrepo.New(t)
+	tr.Write("a.txt", "one\n")
+	tr.Commit("real history commit")
+	tr.Write("a.txt", "two\n")
+	runJog(t, tr.Dir, "-m", "checkpoint one")
+	tr.Write("b.txt", "new\n")
+	runJog(t, tr.Dir, "-m", "checkpoint two")
+
+	stdout, stderr, code := runJog(t, tr.Dir, "snaps", "--json")
+	if code != 0 {
+		t.Fatalf("snaps --json exited %d: %s", code, stderr)
+	}
+	var entries []struct {
+		ID, SHA, Time, Age, Chain, Provenance string
+		Files                                 []struct{ Status, Path string }
+	}
+	if err := json.Unmarshal([]byte(stdout), &entries); err != nil {
+		t.Fatalf("snaps --json is not valid JSON: %v\n%s", err, stdout)
+	}
+	if len(entries) != 2 {
+		t.Fatalf("want 2 entries, got %d:\n%s", len(entries), stdout)
+	}
+	e := entries[0] // newest first
+	if e.Provenance != "manual: checkpoint two" || e.Chain != "main" ||
+		len(e.SHA) != 40 || !strings.HasPrefix(e.SHA, e.ID) || e.Time == "" {
+		t.Errorf("newest entry wrong: %+v", e)
+	}
+	// a.txt was untouched between the checkpoints, so the newest snapshot's
+	// parent-1 diff is exactly the b.txt addition.
+	if len(e.Files) != 1 || e.Files[0].Status != "A" || e.Files[0].Path != "b.txt" {
+		t.Errorf("newest entry files = %+v, want [{A b.txt}]", e.Files)
+	}
+	if f := entries[1].Files; len(f) != 1 || f[0].Status != "M" || f[0].Path != "a.txt" {
+		t.Errorf("oldest entry files = %+v, want [{M a.txt}]", f)
+	}
+
+	// -n limits, and an empty result is an empty array, not prose.
+	stdout, _, _ = runJog(t, tr.Dir, "snaps", "--json", "-n", "1")
+	if strings.Count(stdout, `"sha"`) != 1 {
+		t.Errorf("-n 1 did not limit:\n%s", stdout)
+	}
+	stdout, _, _ = runJog(t, tr.Dir, "snaps", "--json", "nonexistent.txt")
+	if strings.TrimSpace(stdout) != "[]" {
+		t.Errorf("empty JSON result = %q, want []", stdout)
+	}
+
+	// --format owns the output: exactly one line per snapshot, no
+	// name-status appended, no ANSI.
+	stdout, _, code = runJog(t, tr.Dir, "snaps", "--format=%h %s")
+	if code != 0 {
+		t.Fatalf("snaps --format exited %d", code)
+	}
+	lines := strings.Split(strings.TrimSpace(stdout), "\n")
+	if len(lines) != 2 || !strings.HasSuffix(lines[0], "manual: checkpoint two") ||
+		strings.Contains(stdout, "\x1b[") || strings.Contains(stdout, "b.txt") {
+		t.Errorf("--format output wrong:\n%s", stdout)
+	}
+
+	// Loud grammar failures, exit 2.
+	for _, bad := range [][]string{
+		{"snaps", "--json", "-p"},
+		{"snaps", "--json", "--format=%h"},
+		{"snaps", "-n", "potato"},
+		{"snaps", "-n"},
+	} {
+		if _, stderr, code := runJog(t, tr.Dir, bad...); code != 2 || stderr == "" {
+			t.Errorf("%v: code=%d stderr=%q, want loud exit 2", bad, code, stderr)
+		}
 	}
 }
 
