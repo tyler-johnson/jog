@@ -174,7 +174,7 @@ func (d *doctor) checkRepo(repo *gitx.Repo, fix bool) {
 	}
 
 	if out, err := repo.RunRead("config", "--type=int", "--get", "jog.maxFileSize"); err == nil {
-		d.info("max file size", out+" bytes (jog.maxFileSize)")
+		d.info("max file size", out+" bytes (the maxFileSize setting — `jog config` explains it)")
 	} else {
 		d.info("max file size", "50 MiB (default)")
 	}

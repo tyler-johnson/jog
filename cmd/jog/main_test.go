@@ -901,7 +901,7 @@ func TestPick(t *testing.T) {
 // --help) belongs to real git. (TestHelp covers the global forms.)
 func TestPerCommandHelp(t *testing.T) {
 	dir := t.TempDir() // outside any repo: help must not need one
-	verbs := []string{"snaps", "since", "back", "pick", "trim", "doctor", "hook", "agents", "agent"}
+	verbs := []string{"snaps", "since", "back", "pick", "trim", "config", "doctor", "hook", "agents", "agent"}
 	for _, v := range verbs {
 		stdout, _, code := runJog(t, dir, v, "--help")
 		if code != 0 || !strings.Contains(stdout, "usage:") || !strings.Contains(stdout, v) {
@@ -1070,6 +1070,48 @@ func TestAgents(t *testing.T) {
 	_, stderr, code = runJogEnv(t, dir, env, "agents", "install", "clippy")
 	if code != 2 || !strings.Contains(stderr, "supported") {
 		t.Errorf("unknown client: code=%d stderr=%q", code, stderr)
+	}
+
+	// jog config: the self-documenting settings list, get/set/unset
+	// through real git config, values vetted by git's own parsers.
+	tr3 := testrepo.New(t)
+	tr3.Write("a.txt", "x\n")
+	tr3.Commit("base")
+	stdout, _, code = runJog(t, tr3.Dir, "config")
+	for _, want := range []string{"maxFileSize", "keepAll", "keepHourly", "keepDaily", "(default)"} {
+		if code != 0 || !strings.Contains(stdout, want) {
+			t.Errorf("config list missing %q:\n%s", want, stdout)
+		}
+	}
+	if strings.Contains(stdout, "jog.maxFileSize") {
+		t.Errorf("list shows the git-config prefix — jog's surface is prefix-less:\n%s", stdout)
+	}
+	if stdout, _, _ = runJog(t, tr3.Dir, "config", "maxFileSize"); strings.TrimSpace(stdout) != "52428800" {
+		t.Errorf("unset get = %q, want the default", stdout)
+	}
+	if _, _, code = runJog(t, tr3.Dir, "config", "jog.maxFileSize", "100M"); code != 0 {
+		t.Errorf("set exited %d", code)
+	}
+	if got := tr3.Git("config", "--get", "jog.maxFileSize"); got != "100M" {
+		t.Errorf("git sees %q after set", got)
+	}
+	if stdout, _, _ = runJog(t, tr3.Dir, "config", "MAXFILESIZE"); strings.TrimSpace(stdout) != "100M" {
+		t.Errorf("case-insensitive get = %q", stdout)
+	}
+	if stdout, _, code = runJog(t, tr3.Dir, "config", "--unset", "maxFileSize"); code != 0 || !strings.Contains(stdout, "default") {
+		t.Errorf("unset: code=%d %q", code, stdout)
+	}
+	if _, err := tr3.TryGit("config", "--get", "jog.maxFileSize"); err == nil {
+		t.Error("value survived --unset")
+	}
+	if _, stderr, code = runJog(t, tr3.Dir, "config", "keepAll", "banana"); code != 2 || !strings.Contains(stderr, "not a valid value") {
+		t.Errorf("invalid value: code=%d stderr=%q", code, stderr)
+	}
+	if _, err := tr3.TryGit("config", "--get", "jog.keepAll"); err == nil {
+		t.Error("invalid value reached the real config")
+	}
+	if _, stderr, code = runJog(t, tr3.Dir, "config", "jog.nonsense"); code != 2 || !strings.Contains(stderr, "unknown setting") {
+		t.Errorf("unknown setting: code=%d stderr=%q", code, stderr)
 	}
 
 	stdout, _, code = runJogEnv(t, dir, env, "agent", "list")

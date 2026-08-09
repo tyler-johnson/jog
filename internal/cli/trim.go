@@ -299,7 +299,8 @@ func applyTrim(repo *gitx.Repo, ref string, entries []chainEntry, keep []bool) e
 	return nil
 }
 
-// trimPolicy reads jog.keepAll/keepHourly/keepDaily. Values use git's own
+// trimPolicy reads jog.keepAll/keepHourly/keepDaily (see config.go for
+// the user-facing registry). Values use git's own
 // expiry syntax ("3.days", "2.weeks", "never"), parsed by git itself
 // (--type=expiry-date returns the cutoff as epoch seconds; "never" → 0,
 // which turns the tier off by making its window effectively infinite).

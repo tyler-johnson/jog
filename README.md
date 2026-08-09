@@ -168,6 +168,7 @@ Two disjoint namespaces, one rule: **`jog git` is the only door to git.**
 | `jog git <args>` | snapshot, then run the real git command — what the alias expands to |
 | `jog pick [--all] <path>` | scrub through a file's versions — list, preview, enter to restore (`q` leaves everything untouched) |
 | `jog trim [--dry-run]` | apply the retention taper; the previous tip stays at `refs/jog/@trash/<branch>` until the next trim |
+| `jog config [key [value]]` | list jog's settings with values and meanings — or get and set them |
 | `jog doctor [--fix]` | verify invariants, wiring, and liveness (`--fix` repairs the gc config) |
 | `jog agents install` | hooks + skill for every agent client on this machine (`uninstall`, `list`; `[hooks\|skill]` and client names narrow it; `--project`: this repo) |
 | `jog version` | print jog's version |
@@ -286,7 +287,10 @@ Also worth knowing:
 
 ## Configuration
 
-Native `git config` keys — global or per-repo, no new file format:
+Native `git config` keys — global or per-repo, no new file format.
+`jog config` lists every setting with its current value and meaning;
+`jog config <key> <value>` sets one (`--global`, `--unset`), with values
+validated through git's own parsers:
 
 | key | default | meaning |
 |---|---|---|

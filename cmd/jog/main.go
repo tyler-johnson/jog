@@ -34,6 +34,7 @@ usage:
   jog git <args>            snapshot, then run the real git command
   jog pick [--all] <path>   scrub through a file's versions and restore one
   jog trim [--dry-run]      apply the retention taper; drop thinned snapshots
+  jog config [key [value]]  list jog's settings — or get, set (--unset, --global)
   jog doctor [--fix]        verify invariants, wiring, and liveness
   jog version               print jog's version
 
@@ -143,14 +144,30 @@ usage:
   jog trim [--dry-run]
 
 Thins the timeline: everything kept for 24 hours, then one snapshot per
-hour up to 7 days, then one per day up to 90 — configurable via git
-config (jog.keepAll, jog.keepHourly, jog.keepDaily; "never" disables a
+hour up to 7 days, then one per day up to 90 — the keepAll, keepHourly,
+and keepDaily settings (jog config has the details; "never" disables a
 tier). This is the only jog command that discards snapshots, and it
 never runs on its own. The pre-trim state survives at
 refs/jog/@trash/<branch> until the trim after next.
 
 options:
   -n, --dry-run   print the plan, touch nothing
+`,
+	"config": `jog config — jog's settings, all of them
+
+usage:
+  jog config                      list every setting, its value, and what it does
+  jog config <key>                print the effective value
+  jog config <key> <value>        set it for this repo
+  jog config --unset <key>        back to the default
+  (--global with set/unset applies to every repo)
+
+Keys are short names like maxFileSize — case-insensitive, and the
+git-config spelling (jog.maxFileSize) is accepted too. Settings are
+stored as plain git config under jog.*, so git config reads and writes
+them identically; jog config just knows the full list, the defaults,
+and what each one means. Values are validated through git's own
+parsers before anything is written.
 `,
 	"doctor": `jog doctor — verify the net is under you
 
@@ -268,6 +285,8 @@ func run(args []string) int {
 		return cli.Pick(args[1:])
 	case "trim":
 		return cli.Trim(args[1:])
+	case "config":
+		return cli.Config(args[1:])
 	case "doctor":
 		return cli.Doctor(args[1:])
 	case "mcp":
