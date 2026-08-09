@@ -335,18 +335,6 @@ validated through git's own parsers:
   changes, no untracked files, capped at 100 checkpoints / 30 days. jog is
   the other half.
 
-## Roadmap
-
-- **shipped:** snapshot engine, `log` (interactive timeline browser; `--all`
-  forest view; `--json` and `--format` for scripts and agents), `since`,
-  `restore`, `trim` + tapering retention, `doctor`, agent integrations
-  for Claude Code, Codex, Copilot, Cursor, Gemini CLI, and OpenCode (hooks,
-  agent skills, once-per-session notice), brew tap.
-- **next:** automatic trim (piggybacked, at most daily — after the manual
-  command has earned trust), MCP server (agents query their own snapshot
-  history), optional encrypted backup push of `refs/jog/*` to a private
-  remote, shell prompt segment.
-
 ## License
 
 [MIT](LICENSE)
