@@ -51,7 +51,7 @@ func report(res *snap.Result) {
 	case res.NoOp:
 		fmt.Printf("no changes since the last snapshot on %s\n", branch)
 	default:
-		fmt.Printf("snapshot %s on %s\n", res.Commit[:7], branch)
+		fmt.Printf("snapshot %s on %s\n", styleID.Render(res.Commit[:7]), branch)
 	}
 	for _, f := range res.SkippedFiles {
 		fmt.Fprintf(os.Stderr, "jog: skipped %s (over jog.maxFileSize)\n", f)

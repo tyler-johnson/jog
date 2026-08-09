@@ -108,11 +108,11 @@ func Since(args []string) int {
 		return 0
 	}
 	if target == fresh {
-		fmt.Printf("no changes since %s\n", describe(repo, target))
+		fmt.Printf("no changes since %s\n", styleSnapID(describe(repo, target)))
 		return 0
 	}
 
-	fmt.Printf("since %s\n", describe(repo, target))
+	fmt.Printf("since %s\n", styleSnapID(describe(repo, target)))
 	gitArgs := []string{"diff"}
 	if patch {
 		gitArgs = append(gitArgs, "-p")

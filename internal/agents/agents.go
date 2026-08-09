@@ -250,35 +250,50 @@ func Run(args []string) int {
 	}
 }
 
-func row(client, surface, msg string) {
-	fmt.Printf("  %-8s %-6s %s\n", client, surface, msg)
+// Output styles, shared by list/install/uninstall. lipgloss drops the
+// styling on non-TTY output, so piped output stays plain text.
+var (
+	styleTitle = lipgloss.NewStyle().Bold(true)
+	styleGood  = lipgloss.NewStyle().Foreground(lipgloss.Color("2"))
+	styleDim   = lipgloss.NewStyle().Faint(true)
+)
+
+// clientHeader opens a client's output block: bold name, faint title,
+// blank line between blocks.
+func clientHeader(c client, i int) {
+	if i > 0 {
+		fmt.Println()
+	}
+	fmt.Println(styleTitle.Render(c.name) + styleDim.Render(" — "+c.title))
+}
+
+// surfaceRow prints one surface's outcome: a green check when something
+// was (or is) in place, a faint dot for the no-op cases.
+func surfaceRow(surface, msg string, did bool) {
+	if did {
+		fmt.Printf("  %-6s %s %s\n", surface, styleGood.Render("✓"), msg)
+	} else {
+		fmt.Printf("  %-6s %s\n", surface, styleDim.Render("· "+msg))
+	}
 }
 
 // list groups output per client: a title line, then one line per
 // requested surface. Clients with no binary, no config, and no jog
 // integration collapse to a single quiet line — their absence is
-// unremarkable. lipgloss drops the styling on non-TTY output.
+// unremarkable.
 func list(targets []client, hooks, skill bool) int {
-	var (
-		title = lipgloss.NewStyle().Bold(true)
-		good  = lipgloss.NewStyle().Foreground(lipgloss.Color("2"))
-		dim   = lipgloss.NewStyle().Faint(true)
-	)
 	surface := func(name, loc string) {
 		if loc != "" {
-			fmt.Printf("  %-6s %s  %s\n", name, good.Render("✓ installed"), loc)
+			fmt.Printf("  %-6s %s  %s\n", name, styleGood.Render("✓ installed"), loc)
 		} else {
-			fmt.Printf("  %-6s %s\n", name, dim.Render("· not installed"))
+			fmt.Printf("  %-6s %s\n", name, styleDim.Render("· not installed"))
 		}
 	}
 	for i, c := range targets {
-		if i > 0 {
-			fmt.Println()
-		}
-		fmt.Println(title.Render(c.name) + dim.Render(" — "+c.title))
+		clientHeader(c, i)
 		hooksLoc, skillLoc := c.whereHooks(), c.skillLocation()
 		if !c.detected() && hooksLoc == "" && skillLoc == "" {
-			fmt.Println(dim.Render("  not found on this machine — `jog agents install " + c.name + "` forces it"))
+			fmt.Println(styleDim.Render("  not found on this machine — `jog agents install " + c.name + "` forces it"))
 			continue
 		}
 		if hooks {
@@ -297,9 +312,10 @@ func list(targets []client, hooks, skill bool) int {
 func install(targets []client, explicit, hooks, skill, project bool) int {
 	code := 0
 	changed := false
-	for _, c := range targets {
+	for i, c := range targets {
+		clientHeader(c, i)
 		if !explicit && !c.detected() {
-			row(c.name, "", "not found — skipped (`jog agents install "+c.name+"` to force)")
+			fmt.Println(styleDim.Render("  not found — skipped (`jog agents install " + c.name + "` to force)"))
 			continue
 		}
 		if hooks {
@@ -308,7 +324,7 @@ func install(targets []client, explicit, hooks, skill, project bool) int {
 				fmt.Fprintf(os.Stderr, "jog: %s hooks: %v\n", c.name, err)
 				code = 1
 			} else {
-				row(c.name, "hooks", msg)
+				surfaceRow("hooks", msg, did)
 				changed = changed || did
 			}
 		}
@@ -318,12 +334,13 @@ func install(targets []client, explicit, hooks, skill, project bool) int {
 				fmt.Fprintf(os.Stderr, "jog: %s skill: %v\n", c.name, err)
 				code = 1
 			} else {
-				row(c.name, "skill", msg)
+				surfaceRow("skill", msg, did)
 				changed = changed || did
 			}
 		}
 	}
 	if changed {
+		fmt.Println()
 		fmt.Println("`jog agents uninstall` removes them; `jog doctor` verifies the wiring.")
 		if project {
 			fmt.Println("(project scope: a committed hook file only works for teammates who")
@@ -336,23 +353,24 @@ func install(targets []client, explicit, hooks, skill, project bool) int {
 
 func uninstall(targets []client, hooks, skill, project bool) int {
 	code := 0
-	for _, c := range targets {
+	for i, c := range targets {
+		clientHeader(c, i)
 		if hooks {
-			msg, _, err := c.uninstallHooks(project)
+			msg, did, err := c.uninstallHooks(project)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "jog: %s hooks: %v\n", c.name, err)
 				code = 1
 			} else {
-				row(c.name, "hooks", msg)
+				surfaceRow("hooks", msg, did)
 			}
 		}
 		if skill {
-			msg, _, err := c.uninstallSkill(project)
+			msg, did, err := c.uninstallSkill(project)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "jog: %s skill: %v\n", c.name, err)
 				code = 1
 			} else {
-				row(c.name, "skill", msg)
+				surfaceRow("skill", msg, did)
 			}
 		}
 	}

@@ -171,8 +171,8 @@ func backPaths(repo *gitx.Repo, target string, paths []string) int {
 		fmt.Fprintf(os.Stderr, "jog: %v\n", err)
 		return 1
 	}
-	fmt.Printf("restored %s from %s\n", strings.Join(paths, " "), describe(repo, target))
-	fmt.Println("(undo: jog back " + strings.Join(paths, " ") + ")")
+	fmt.Printf("restored %s from %s\n", strings.Join(paths, " "), styleSnapID(describe(repo, target)))
+	fmt.Println(styleDim.Render("(undo: jog back " + strings.Join(paths, " ") + ")"))
 	return 0
 }
 
@@ -221,8 +221,8 @@ func backAll(repo *gitx.Repo, target, fresh string) int {
 			return 1
 		}
 	}
-	fmt.Printf("restored to %s: %d restored, %d deleted\n", describe(repo, target), len(toRestore), len(toDelete))
-	fmt.Println("(undo: jog back --all)")
+	fmt.Printf("restored to %s: %d restored, %d deleted\n", styleSnapID(describe(repo, target)), len(toRestore), len(toDelete))
+	fmt.Println(styleDim.Render("(undo: jog back --all)"))
 	return 0
 }
 

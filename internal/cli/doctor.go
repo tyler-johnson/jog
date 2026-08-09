@@ -58,7 +58,7 @@ func Doctor(args []string) int {
 	d.checkTriggers()
 
 	if d.findings == 0 {
-		fmt.Println("\nno findings — the net is under you")
+		fmt.Println("\n" + styleGood.Render("no findings — the net is under you"))
 		return 0
 	}
 	fmt.Printf("\n%d finding(s)", d.findings)
@@ -74,11 +74,15 @@ type doctor struct {
 	fixable  int
 }
 
-func (d *doctor) ok(what, detail string)   { fmt.Printf("  ok    %-14s %s\n", what, detail) }
-func (d *doctor) info(what, detail string) { fmt.Printf("  info  %-14s %s\n", what, detail) }
+func (d *doctor) ok(what, detail string) {
+	fmt.Printf("  %s    %-14s %s\n", styleGood.Render("ok"), what, detail)
+}
+func (d *doctor) info(what, detail string) {
+	fmt.Printf("  %s  %-14s %s\n", styleDim.Render("info"), what, detail)
+}
 func (d *doctor) warn(what, detail string) {
 	d.findings++
-	fmt.Printf("  WARN  %-14s %s\n", what, detail)
+	fmt.Printf("  %s  %-14s %s\n", styleWarn.Render("WARN"), what, detail)
 }
 
 func (d *doctor) checkRepo(repo *gitx.Repo, fix bool) {
