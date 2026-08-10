@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	"github.com/tyler-johnson/jog/internal/gitx"
-	"github.com/tyler-johnson/jog/internal/retain"
 	"github.com/tyler-johnson/jog/internal/testrepo"
 	"time"
 )
@@ -61,7 +60,7 @@ func TestTrimContention(t *testing.T) {
 	if len(entries) != 3 {
 		t.Fatalf("listChain: want 3 entries, got %d", len(entries))
 	}
-	keep := planTrim(retain.Default, time.Now(), entries)
+	keep := planTrim(defaultKeep, time.Now(), entries)
 	if keep[len(keep)-1] {
 		t.Fatalf("expected the 95d snapshot to be planned for dropping: %v", keep)
 	}

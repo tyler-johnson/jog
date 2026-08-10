@@ -35,7 +35,7 @@ usage:
   jog hook <client>            agent hook entry point (reads JSON on stdin)
   jog editor-hook <editor>     editor save hook entry point (file path as argument)
   jog git <args>               snapshot, then run the real git command
-  jog trim [--dry-run]         apply the retention taper; drop thinned snapshots
+  jog trim [--dry-run]         drop snapshots older than the keep setting (default 90 days)
   jog config [key [value]]     list jog's settings — or get, set (--unset, --global)
   jog doctor [--fix]           verify invariants, wiring, and liveness
   jog version                  print jog's version
@@ -184,20 +184,25 @@ time; use --at (or --) when a path could be mistaken for a target.
 `,
 	"restore": restoreHelp,
 	"back":    restoreHelp,
-	"trim": `jog trim — apply the retention taper
+	"trim": `jog trim — drop old snapshots
 
 usage:
-  jog trim [--dry-run]
+  jog trim [--dry-run] [--gone]
 
-Thins the timeline: everything kept for 24 hours, then one snapshot per
-hour up to 7 days, then one per day up to 90 — the keepAll, keepHourly,
-and keepDaily settings (jog config has the details; "never" disables a
-tier). This is the only jog command that discards snapshots, and it
-never runs on its own. The pre-trim state survives at
-refs/jog/@trash/<branch> until the trim after next.
+Drops every snapshot older than the keep setting, which defaults to
+90 days ("jog config keep 30.days" changes it; "never" keeps
+everything). A chain whose snapshots have all aged out is removed
+whole — deleted branches' timelines eventually vanish on their own, and
+--gone removes them right away. With the maxSize setting, trim also
+drops oldest snapshots beyond a total disk budget; the budget is one
+snapshot lenient — the snapshot that crosses it survives — so even a
+tiny maxSize leaves the newest snapshot. This is the only jog command
+that discards snapshots, and it never runs on its own. The pre-trim
+state survives at refs/jog/@trash/<branch> until the trim after next.
 
 options:
   -n, --dry-run   print the plan, touch nothing
+  --gone          drop chains whose branch no longer exists, whatever their age
 `,
 	"config": `jog config — jog's settings, all of them
 

@@ -38,18 +38,18 @@ var configOptions = []configOption{
 			"lists them. 0 disables the guard.",
 	},
 	{
-		key: "jog.keepAll", def: "24.hours", kind: "expiry",
-		desc: "trim keeps every snapshot younger than this.",
+		key: "jog.keep", def: "90.days", kind: "expiry",
+		desc: "How long snapshots live: `jog trim` drops everything older, and a\n" +
+			"chain whose snapshots have all aged out is removed whole. Takes git\n" +
+			"expiry syntax (30.days, 6.months, never — never keeps everything).",
 	},
 	{
-		key: "jog.keepHourly", def: "7.days", kind: "expiry",
-		desc: "Beyond keepAll, trim keeps one snapshot per hour up to this age.",
-	},
-	{
-		key: "jog.keepDaily", def: "90.days", kind: "expiry",
-		desc: "Beyond keepHourly, trim keeps one snapshot per day up to this age;\n" +
-			"older snapshots are dropped. All three tiers take git expiry syntax\n" +
-			"(3.days, 2.weeks, never — never disables the tier).",
+		key: "jog.maxSize", def: "0", kind: "int",
+		desc: "Total disk budget for snapshots: when they hold more than this,\n" +
+			"`jog trim` drops oldest snapshots first — tightening the age cutoff\n" +
+			"below keep — until the estimate fits, one snapshot leniently (the\n" +
+			"snapshot that crosses the budget survives). 0 = no budget (the\n" +
+			"default). Suffixes work: 500M, 2G.",
 	},
 }
 

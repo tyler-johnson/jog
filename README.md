@@ -221,7 +221,7 @@ Two disjoint namespaces, one rule: **`jog git` is the only door to git.**
 | `jog restore <path>… [--at T]` | restore files from a snapshot (worktree only) |
 | `jog restore --all [--at T]` | restore the whole tree, including deleting files created since |
 | `jog git <args>` | snapshot, then run the real git command — what the alias expands to |
-| `jog trim [--dry-run]` | apply the retention taper; the previous tip stays at `refs/jog/@trash/<branch>` until the next trim |
+| `jog trim [--dry-run] [--gone]` | drop snapshots older than `jog.keep` (default 90 days); `--gone` also drops deleted branches' chains; the previous tip stays at `refs/jog/@trash/<branch>` until the next trim |
 | `jog config [key [value]]` | list jog's settings with values and meanings — or get and set them |
 | `jog doctor [--fix]` | verify invariants, wiring, and liveness (`--fix` repairs the gc config) |
 | `jog agents install` | hooks + skill for every agent client on this machine (`uninstall`, `list`; `[hooks\|skill]` and client names narrow it; `--project`: this repo) |
@@ -294,16 +294,23 @@ $ jog log --json src/ | jq -r '.[].provenance'
 $ jog log --format='%h %cI %s'  # any git log format, one entry per line
 ```
 
-**The timeline is getting long.** Apply the retention taper — everything
-kept ≤ 24 h, hourly ≤ 7 d, daily ≤ 90 d:
+**The timeline is getting long.** Drop everything older than 90 days
+(configurable):
 
 ```console
 $ jog trim --dry-run     # the plan, touching nothing
 $ jog trim               # apply; the pre-trim tip stays at refs/jog/@trash/<branch>
+$ jog trim --gone        # also drop chains whose branch no longer exists
 ```
 
 Trim is the only jog command that discards snapshots, it never runs on its
-own, and its last pre-trim state survives until the trim after next.
+own, and its last pre-trim state survives until the trim after next. A
+chain whose snapshots have all aged out is removed whole, so deleted
+branches' timelines eventually vanish on their own — `--gone` skips the
+wait. Both trim and `jog doctor` report how much disk the snapshots hold;
+the `maxSize` setting adds a total disk budget that trim enforces by
+dropping oldest snapshots first, one snapshot leniently — the snapshot
+that crosses the budget stays.
 
 ## What jog will never touch
 
@@ -349,9 +356,10 @@ Also worth knowing:
   refspecs, and `git bundle --all`. Your snapshots contain your scratch work
   — know your mirror scripts. (That includes `refs/jog/@trash/*`, which
   holds snapshots the last `jog trim` dropped, one cycle longer.)
-- Retention is manual: run `jog trim` when you want the taper applied —
-  nothing schedules it behind your back. Space cost is low either way
-  (content-addressed, delta-compressed by repack).
+- Retention is manual: run `jog trim` when you want old snapshots dropped
+  — nothing schedules it behind your back. Space cost is low either way
+  (content-addressed, delta-compressed by repack); `jog doctor` shows the
+  actual number, and `maxSize` can cap it.
 - New files over 50 MiB are skipped (configurable, see below) and listed in
   the timeline entry.
 
@@ -365,9 +373,8 @@ validated through git's own parsers:
 | key | default | meaning |
 |---|---|---|
 | `jog.maxFileSize` | `50m` | skip new files larger than this (`0` disables the guard) |
-| `jog.keepAll` | `24.hours` | `jog trim` keeps every snapshot younger than this |
-| `jog.keepHourly` | `7.days` | …then one per hour up to this age |
-| `jog.keepDaily` | `90.days` | …then one per day up to this age; older ones are dropped (`never` disables a tier) |
+| `jog.keep` | `90.days` | `jog trim` drops snapshots older than this (`never` keeps everything) |
+| `jog.maxSize` | `0` (off) | total disk budget for snapshots — `jog trim` drops oldest first until the estimate fits (one snapshot lenient) |
 | `gc.refs/jog/*.reflogExpire` | `never` | set by jog on first snapshot; keeps gc off jog's reflogs |
 | `gc.refs/jog/*.reflogExpireUnreachable` | `never` | same |
 

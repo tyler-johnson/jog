@@ -276,16 +276,27 @@ design change): zsh preexec one-liner, post-op beacon.
 
 ## 7. Retention
 
-Tapering policy, configured via `git config jog.*`, defaults:
+One age cutoff, configured via `git config jog.keep` (git expiry syntax),
+default 90 days: `jog trim` drops everything older, tips included — a chain
+whose snapshots have all aged out is removed whole, so deleted branches'
+(and @detached) timelines eventually vanish on their own; `--gone` removes
+dead chains immediately, and stale @trash refs for removed chains go on the
+following run. (Originally a three-tier taper — all ≤ 24 h · hourly ≤ 7 d
+· daily ≤ 90 d — simplified 2026-08-09; see open question 2.)
 
-- everything ≤ 24 h · hourly ≤ 7 d · daily ≤ 90 d
+A size budget rides on top (2026-08-09): `jog.maxSize` (default off) makes
+trim tighten the age cutoff — oldest snapshots first, one snapshot lenient
+(the snapshot that crosses the budget survives, so even a 1-byte budget
+keeps the newest) — until the projected survivor size fits. Both trim and doctor report jog-attributable
+disk usage via `rev-list --disk-usage` (positives = refs or survivor *tree*
+shas, negated against all non-jog refs; git ≥ 2.31, degrades gracefully).
 
 Mechanism: `jog trim` rewrites the (private, synthetic, never-shared) chain
-dropping thinned snapshots, deletes corresponding reflog entries, then
+dropping expired snapshots, deletes corresponding reflog entries, then
 `git gc --auto` reclaims. We never delete objects directly — we stop pointing
-at them and let git collect. Trim piggybacks on every Nth snapshot invocation:
-command-triggered maintenance for a command-triggered tool. jog sets
-`gc.refs/jog/*.reflogExpire=never` so git's own gc never races the policy.
+at them and let git collect. Trim is manual-only (PLAN-V1 D19): nothing
+schedules it. jog sets `gc.refs/jog/*.reflogExpire=never` so git's own gc
+never races the policy.
 
 ## 8. MCP server (`jog mcp`)
 
@@ -366,9 +377,11 @@ Accepted gaps (documented, not defended):
    repos are small/dormant (natethinks/jog ★472 shell script, tj/jog ★130,
    qiangyt/jog ★43); nothing in the git-tooling niche uses the name.
 2. ~~Retention defaults — are 24h/7d/90d the right taper?~~ **Closed for v1
-   2026-08-08 (PLAN-V1 D16):** defaults stand, configurable via
-   `jog.keepAll`/`keepHourly`/`keepDaily` in git's own expiry syntax;
-   revisit only if dogfood argues.
+   2026-08-08 (PLAN-V1 D16)**, then **superseded 2026-08-09:** the taper's
+   three tiers bought little over its simplest form and cost real
+   explanation; retention is now one age cutoff — `jog.keep`, default
+   90 days, git expiry syntax; age spares nothing (fully aged chains are
+   removed whole), and the size budget is one snapshot lenient.
 3. ~~`trim` chain-rewrite details.~~ **Closed 2026-08-08 (PLAN-V1 D17):**
    base edges preserved verbatim; parent 1 relinked; a new oldest survivor
    anchors to its own base edge; reflog replayed with original timestamps.
@@ -406,5 +419,5 @@ Cline (shadow-repo disk blowup) · GitButler (requires adopting client) ·
 ShadowGit (commercial, closed; MCP-history idea worth stealing) · SafeSandbox
 (new, no traction) · jj (the workflow tax this project exists to avoid).
 Unserved combination jog targets: capture-everything + zero-workflow-change +
-untracked/deleted files + per-file time travel + tapering retention + human-AND-
-agent coverage + git-native storage.
+untracked/deleted files + per-file time travel + long configurable retention +
+human-AND-agent coverage + git-native storage.

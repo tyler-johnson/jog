@@ -744,6 +744,20 @@ func TestDoctor(t *testing.T) {
 		t.Errorf("healthy output:\n%s", stdout)
 	}
 
+	// Disk + trim visibility: the cost line is always there; a fresh chain
+	// has nothing to drop. An over-age snapshot flips the trim line to say
+	// so — info, not a finding, so the exit code stays 0.
+	if !strings.Contains(stdout, "snapshot disk") || !strings.Contains(stdout, "nothing to drop") {
+		t.Errorf("disk/trim lines missing:\n%s", stdout)
+	}
+	agedHead := tr.Git("rev-parse", "HEAD")
+	mintSnap(t, tr, "refs/jog/aged", "old", time.Now().Add(-95*24*time.Hour), agedHead)
+	mintSnap(t, tr, "refs/jog/aged", "new", time.Now().Add(-time.Hour), agedHead)
+	stdout, _, code = runJogEnv(t, tr.Dir, env, "doctor")
+	if code != 0 || !strings.Contains(stdout, "1 snapshot older than ~90 days — `jog trim` drops them") {
+		t.Errorf("trim-needed line: code=%d\n%s", code, stdout)
+	}
+
 	// gc keys stripped: a finding, and --fix restores exactly those two.
 	tr.Git("config", "--unset", "gc.refs/jog/*.reflogExpire")
 	tr.Git("config", "--unset", "gc.refs/jog/*.reflogExpireUnreachable")
@@ -821,11 +835,12 @@ func mintSnap(t *testing.T, tr *testrepo.Repo, ref, content string, date time.Ti
 	return sha
 }
 
-// TestTrim covers matrix rows 25–27 and 29: taper applied through a real
-// chain rewrite — survivors byte-preserved (tree, dates, message, base
-// edge), dropped snapshots off the timeline but held by the insurance ref,
-// reflog replayed with true timestamps, dry-run inert, keep-all fenced,
-// user index untouched.
+// TestTrim covers matrix rows 25–27 and 29: the keep window applied
+// through a real chain rewrite — survivors byte-preserved (tree, dates,
+// message, base edge), dropped snapshots off the timeline but held by the
+// insurance ref, reflog replayed with true timestamps, dry-run inert,
+// user index untouched. The drops are the chain's oldest entries, so
+// every survivor is re-committed — the preservation checks cover them all.
 func TestTrim(t *testing.T) {
 	tr := testrepo.New(t)
 	tr.Write("a.txt", "real\n")
@@ -833,24 +848,16 @@ func TestTrim(t *testing.T) {
 	head := tr.Git("rev-parse", "HEAD")
 
 	now := time.Now()
-	utcDay := func(age time.Duration, offset time.Duration) time.Time {
-		return now.Add(-age).UTC().Truncate(24 * time.Hour).Add(offset)
-	}
-	utcHour := func(age time.Duration, offset time.Duration) time.Time {
-		return now.Add(-age).UTC().Truncate(time.Hour).Add(offset)
-	}
-
 	ref := "refs/jog/main"
-	ancient := mintSnap(t, tr, ref, "ancient", now.Add(-95*24*time.Hour), head)
-	dailyA1 := mintSnap(t, tr, ref, "dailyA1", utcDay(10*24*time.Hour, 2*time.Hour), head)
-	dailyA2 := mintSnap(t, tr, ref, "dailyA2", utcDay(10*24*time.Hour, 3*time.Hour), head)
-	hourlyB1 := mintSnap(t, tr, ref, "hourlyB1", utcHour(72*time.Hour, 10*time.Minute), head)
-	hourlyB2 := mintSnap(t, tr, ref, "hourlyB2", utcHour(72*time.Hour, 25*time.Minute), head)
+	ancient1 := mintSnap(t, tr, ref, "ancient1", now.Add(-120*24*time.Hour), head)
+	ancient2 := mintSnap(t, tr, ref, "ancient2", now.Add(-95*24*time.Hour), head)
+	month := mintSnap(t, tr, ref, "month", now.Add(-30*24*time.Hour), head)
+	week := mintSnap(t, tr, ref, "week", now.Add(-7*24*time.Hour), head)
 	recent := mintSnap(t, tr, ref, "recent", now.Add(-2*time.Hour), head)
 	tip := mintSnap(t, tr, ref, "tip", now.Add(-10*time.Minute), head)
 
 	survivorMeta := map[string]string{}
-	for _, sha := range []string{dailyA2, hourlyB2, recent, tip} {
+	for _, sha := range []string{month, week, recent, tip} {
 		survivorMeta[sha] = tr.Git("log", "-1", "--date=raw", "--format=%T|%ad|%cd|%B|%P", sha)
 	}
 	idxBefore := tr.IndexBytes()
@@ -858,8 +865,11 @@ func TestTrim(t *testing.T) {
 
 	// Dry run: the plan, and nothing else.
 	stdout, stderr, code := runJog(t, tr.Dir, "trim", "--dry-run")
-	if code != 0 || !strings.Contains(stdout, "would drop 3 of 7") {
+	if code != 0 || !strings.Contains(stdout, "would drop 2 of 6") {
 		t.Fatalf("dry-run: code=%d\n%s%s", code, stdout, stderr)
+	}
+	if !strings.Contains(stdout, "snapshots hold ~") || !strings.Contains(stdout, "settles to ~") {
+		t.Errorf("dry-run size footer missing:\n%s", stdout)
 	}
 	if got := tr.Git("rev-parse", ref); got != tip {
 		t.Fatalf("dry-run moved the ref: %s", got)
@@ -873,8 +883,11 @@ func TestTrim(t *testing.T) {
 
 	// Apply. The pre-trim snapshot no-ops (worktree == tip content).
 	stdout, stderr, code = runJog(t, tr.Dir, "trim")
-	if code != 0 || !strings.Contains(stdout, "dropped 3 of 7") {
+	if code != 0 || !strings.Contains(stdout, "dropped 2 of 6") {
 		t.Fatalf("trim: code=%d\n%s%s", code, stdout, stderr)
+	}
+	if !strings.Contains(stdout, "frees after the next trim") {
+		t.Errorf("apply size footer missing:\n%s", stdout)
 	}
 
 	// Row 29: the user's index is untouched by the one command that deletes.
@@ -894,7 +907,7 @@ func TestTrim(t *testing.T) {
 	if len(jogLines) != 4 {
 		t.Fatalf("survivor walk: want 4 jog snapshots, got %d:\n%s", len(jogLines), walk)
 	}
-	for i, want := range []string{"tip", "recent", "hourlyB2", "dailyA2"} {
+	for i, want := range []string{"tip", "recent", "week", "month"} {
 		if !strings.HasSuffix(jogLines[i], "manual: "+want) {
 			t.Errorf("survivor %d: want %q, got %q", i, want, jogLines[i])
 		}
@@ -903,7 +916,7 @@ func TestTrim(t *testing.T) {
 	// Row 25: survivors preserved verbatim — tree, author/committer dates,
 	// message, base edge; only parent 1 relinked.
 	newShas := strings.Split(tr.Git("rev-list", "--first-parent", "-4", ref), "\n")
-	for i, orig := range []string{tip, recent, hourlyB2, dailyA2} {
+	for i, orig := range []string{tip, recent, week, month} {
 		got := tr.Git("log", "-1", "--date=raw", "--format=%T|%ad|%cd|%B|%P", newShas[i])
 		want := survivorMeta[orig]
 		gw, ww := strings.Split(got, "|"), strings.Split(want, "|")
@@ -919,7 +932,7 @@ func TestTrim(t *testing.T) {
 
 	// Dropped snapshots: off the timeline, held by the insurance ref.
 	revList := tr.Git("rev-list", "--first-parent", ref)
-	for _, dropped := range []string{ancient, dailyA1, hourlyB1} {
+	for _, dropped := range []string{ancient1, ancient2} {
 		if strings.Contains(revList, dropped) {
 			t.Errorf("dropped snapshot %s still on the timeline", dropped[:7])
 		}
@@ -937,17 +950,167 @@ func TestTrim(t *testing.T) {
 	if got := len(strings.Split(reflog, "\n")); got != 4 {
 		t.Errorf("reflog: want 4 entries, got %d:\n%s", got, reflog)
 	}
-	atDaily := utcDay(10*24*time.Hour, 3*time.Hour).Add(30 * time.Minute).Format(time.RFC3339)
-	sha := tr.Git("rev-parse", ref+"@{"+atDaily+"}")
-	if wantTree := strings.Split(survivorMeta[dailyA2], "|")[0]; tr.Git("log", "-1", "--format=%T", sha) != wantTree {
+	atMonth := now.Add(-30 * 24 * time.Hour).Add(30 * time.Minute).Format(time.RFC3339)
+	sha := tr.Git("rev-parse", ref+"@{"+atMonth+"}")
+	if wantTree := strings.Split(survivorMeta[month], "|")[0]; tr.Git("log", "-1", "--format=%T", sha) != wantTree {
 		t.Errorf("@{time} query resolved wrong survivor")
 	}
 
 	// Idempotence: a second trim finds nothing (its own boundary snapshot
-	// no-ops, and the survivors all satisfy the policy).
+	// no-ops, and the survivors all sit inside the keep window).
 	stdout, _, _ = runJog(t, tr.Dir, "trim")
 	if !strings.Contains(stdout, "nothing to trim") {
 		t.Errorf("second trim not idempotent:\n%s", stdout)
+	}
+}
+
+// TestTrimMaxSize: the size budget tightens the age cutoff, one snapshot
+// leniently — the snapshot that crosses the budget survives, so a budget
+// exceeded only by its crossing snapshot drops nothing, a 1-byte budget
+// still leaves the newest snapshot, and no budget means no budget lines.
+func TestTrimMaxSize(t *testing.T) {
+	tr := testrepo.New(t)
+	tr.Write("a.txt", "real\n")
+	tr.Commit("base")
+	head := tr.Git("rev-parse", "HEAD")
+	now := time.Now()
+
+	// Four snapshots, each pinning a distinct ~256 KiB of content history
+	// never saw — LCG bytes, so zlib can't fold them away.
+	blob := func(seed uint32) string {
+		b := make([]byte, 256<<10)
+		x := seed*2654435761 | 1
+		for i := range b {
+			x = x*1664525 + 1013904223
+			b[i] = byte(x >> 24)
+		}
+		return string(b)
+	}
+	ref := "refs/jog/main"
+	tr.Write("big.bin", blob(1))
+	older := mintSnap(t, tr, ref, "older", now.Add(-60*24*time.Hour), head)
+	tr.Write("big.bin", blob(2))
+	mintSnap(t, tr, ref, "old", now.Add(-40*24*time.Hour), head)
+	tr.Write("big.bin", blob(3))
+	mintSnap(t, tr, ref, "mid", now.Add(-20*24*time.Hour), head)
+	tr.Write("big.bin", blob(4))
+	mintSnap(t, tr, ref, "new", now.Add(-time.Hour), head)
+
+	// No budget set: everything is inside the 90-day window, nothing to do,
+	// and no budget wording anywhere.
+	stdout, stderr, code := runJog(t, tr.Dir, "trim", "--dry-run")
+	if code != 0 || !strings.Contains(stdout, "nothing to trim") || strings.Contains(stdout, "size budget") {
+		t.Fatalf("no-budget dry-run: code=%d\n%s%s", code, stdout, stderr)
+	}
+
+	// ~1 MiB held, 800k budget: over, but only by the crossing snapshot —
+	// the one-snapshot leniency covers it and nothing drops.
+	tr.Git("config", "jog.maxSize", "800k")
+	stdout, stderr, code = runJog(t, tr.Dir, "trim", "--dry-run")
+	if code != 0 || !strings.Contains(stdout, "within one snapshot of the budget") ||
+		!strings.Contains(stdout, "nothing to trim") || strings.Contains(stdout, "would drop") {
+		t.Fatalf("within-one dry-run: code=%d\n%s%s", code, stdout, stderr)
+	}
+
+	// 600k fits two blobs and the third crosses: the cutoff lands on the
+	// crossing snapshot's age (~40 days) and only what is older drops.
+	tr.Git("config", "jog.maxSize", "600k")
+	stdout, stderr, code = runJog(t, tr.Dir, "trim", "--dry-run")
+	if code != 0 || !strings.Contains(stdout, "size budget") || !strings.Contains(stdout, "would drop 1 of 4") {
+		t.Fatalf("budget dry-run: code=%d\n%s%s", code, stdout, stderr)
+	}
+	stdout, stderr, code = runJog(t, tr.Dir, "trim")
+	if code != 0 || !strings.Contains(stdout, "dropped 1 of 4") || !strings.Contains(stdout, "~40 days") {
+		t.Fatalf("budget trim: code=%d\n%s%s", code, stdout, stderr)
+	}
+	walk := tr.Git("log", "--first-parent", "--format=%s", ref)
+	if strings.Contains(walk, "manual: older") || !strings.Contains(walk, "manual: old") ||
+		!strings.Contains(walk, "manual: mid") || !strings.Contains(walk, "manual: new") {
+		t.Errorf("survivors after budget trim:\n%s", walk)
+	}
+	if _, err := tr.TryGit("cat-file", "-e", older); err != nil {
+		t.Errorf("dropped snapshot not held by the insurance ref")
+	}
+
+	// A 1-byte budget: even the newest snapshot alone is over, and the
+	// leniency keeps exactly it.
+	tr.Git("config", "jog.maxSize", "1")
+	stdout, stderr, code = runJog(t, tr.Dir, "trim")
+	if code != 0 || !strings.Contains(stdout, "size budget 1 B: dropping snapshots older than") ||
+		!strings.Contains(stdout, "dropped 2 of 3") {
+		t.Fatalf("1-byte budget: code=%d\n%s%s", code, stdout, stderr)
+	}
+	walk = tr.Git("log", "--first-parent", "--format=%s", ref)
+	if !strings.HasPrefix(walk, "manual: new") || strings.Contains(walk, "manual: mid") {
+		t.Errorf("newest snapshot should be the sole survivor:\n%s", walk)
+	}
+}
+
+// TestTrimGone: age spares nothing — a chain whose snapshots have all
+// aged out is removed whole, branch or no branch; --gone removes dead
+// chains immediately; and the stale @trash a removed chain leaves behind
+// goes on the following run.
+func TestTrimGone(t *testing.T) {
+	tr := testrepo.New(t)
+	tr.Write("a.txt", "real\n")
+	tr.Commit("base")
+	head := tr.Git("rev-parse", "HEAD")
+	now := time.Now()
+
+	// feature: a branch that no longer exists, fully aged. main: alive
+	// but fully aged too — age takes both whole.
+	mintSnap(t, tr, "refs/jog/feature", "feat-old", now.Add(-100*24*time.Hour), head)
+	featTip := mintSnap(t, tr, "refs/jog/feature", "feat-tip", now.Add(-95*24*time.Hour), head)
+	mainTip := mintSnap(t, tr, "refs/jog/main", "main-tip", now.Add(-95*24*time.Hour), head)
+
+	stdout, stderr, code := runJog(t, tr.Dir, "trim", "--dry-run")
+	if code != 0 ||
+		!strings.Contains(stdout, "feature: branch is gone — would remove the chain (2 snapshots)") ||
+		!strings.Contains(stdout, "main: would drop all 1 snapshot and remove the chain") {
+		t.Fatalf("dry-run: code=%d\n%s%s", code, stdout, stderr)
+	}
+
+	// Apply: both chains gone, both tips held by trash. (The run's own
+	// boundary snapshot no-ops — the worktree matches main's tip.)
+	stdout, stderr, code = runJog(t, tr.Dir, "trim")
+	if code != 0 ||
+		!strings.Contains(stdout, "feature: branch is gone — chain removed (2 snapshots saved at refs/jog/@trash/feature until the next trim)") ||
+		!strings.Contains(stdout, "main: dropped all 1 snapshot — chain removed (saved at refs/jog/@trash/main until the next trim)") {
+		t.Fatalf("apply: code=%d\n%s%s", code, stdout, stderr)
+	}
+	for _, ref := range []string{"refs/jog/feature", "refs/jog/main"} {
+		if _, err := tr.TryGit("rev-parse", "-q", "--verify", ref); err == nil {
+			t.Errorf("%s still exists after full age-out", ref)
+		}
+	}
+	if got := tr.Git("rev-parse", "refs/jog/@trash/feature"); got != featTip {
+		t.Errorf("feature trash: want %s, got %s", featTip[:7], got[:7])
+	}
+	if got := tr.Git("rev-parse", "refs/jog/@trash/main"); got != mainTip {
+		t.Errorf("main trash: want %s, got %s", mainTip[:7], got[:7])
+	}
+
+	// Next trim: feature's stale trash goes. main's chain is revived by
+	// this run's own boundary snapshot (dirty worktree), so its trash is
+	// not stale and stays.
+	stdout, stderr, code = runJog(t, tr.Dir, "trim")
+	if code != 0 || !strings.Contains(stdout, "feature: stale trash removed (its chain was already gone)") {
+		t.Fatalf("stale trash: code=%d\n%s%s", code, stdout, stderr)
+	}
+	if _, err := tr.TryGit("rev-parse", "-q", "--verify", "refs/jog/@trash/feature"); err == nil {
+		t.Error("feature trash still exists")
+	}
+	tr.Git("rev-parse", "refs/jog/@trash/main")
+
+	// --gone: a dead chain too young for age goes immediately.
+	mintSnap(t, tr, "refs/jog/dead", "dead-tip", now.Add(-time.Hour), head)
+	stdout, _, code = runJog(t, tr.Dir, "trim")
+	if code != 0 || !strings.Contains(stdout, "dead: 1 snapshot, nothing to trim") {
+		t.Fatalf("young dead chain should survive a plain trim: code=%d\n%s", code, stdout)
+	}
+	stdout, _, code = runJog(t, tr.Dir, "trim", "--gone")
+	if code != 0 || !strings.Contains(stdout, "dead: branch is gone — chain removed (1 snapshot saved at refs/jog/@trash/dead until the next trim)") {
+		t.Fatalf("--gone: code=%d\n%s", code, stdout)
 	}
 }
 
@@ -1187,7 +1350,7 @@ func TestAgents(t *testing.T) {
 	tr3.Write("a.txt", "x\n")
 	tr3.Commit("base")
 	stdout, _, code = runJog(t, tr3.Dir, "config")
-	for _, want := range []string{"maxFileSize", "keepAll", "keepHourly", "keepDaily", "(default)"} {
+	for _, want := range []string{"maxFileSize", "keep", "(default)"} {
 		if code != 0 || !strings.Contains(stdout, want) {
 			t.Errorf("config list missing %q:\n%s", want, stdout)
 		}
@@ -1213,10 +1376,10 @@ func TestAgents(t *testing.T) {
 	if _, err := tr3.TryGit("config", "--get", "jog.maxFileSize"); err == nil {
 		t.Error("value survived --unset")
 	}
-	if _, stderr, code = runJog(t, tr3.Dir, "config", "keepAll", "banana"); code != 2 || !strings.Contains(stderr, "not a valid value") {
+	if _, stderr, code = runJog(t, tr3.Dir, "config", "keep", "banana"); code != 2 || !strings.Contains(stderr, "not a valid value") {
 		t.Errorf("invalid value: code=%d stderr=%q", code, stderr)
 	}
-	if _, err := tr3.TryGit("config", "--get", "jog.keepAll"); err == nil {
+	if _, err := tr3.TryGit("config", "--get", "jog.keep"); err == nil {
 		t.Error("invalid value reached the real config")
 	}
 	if _, stderr, code = runJog(t, tr3.Dir, "config", "jog.nonsense"); code != 2 || !strings.Contains(stderr, "unknown setting") {

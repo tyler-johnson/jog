@@ -179,6 +179,63 @@ func (d *doctor) checkRepo(repo *gitx.Repo, fix bool) {
 	} else {
 		d.info("max file size", "50 MiB (default)")
 	}
+
+	d.checkDisk(repo, out)
+}
+
+// checkDisk reports what the timeline costs and whether trim has work —
+// the same plan `jog trim --dry-run` would compute, reduced to one line.
+// info, not warn: an old timeline is data waiting for a decision, not a
+// broken net. refLines is checkRepo's for-each-ref output, reused so the
+// refs are only listed once.
+func (d *doctor) checkDisk(repo *gitx.Repo, refLines string) {
+	size, err := jogDiskUsage(repo)
+	if err != nil {
+		d.info("snapshot disk", "unavailable (needs git ≥ 2.31)")
+		return
+	}
+	d.info("snapshot disk", "~"+humanBytes(size))
+
+	keepFor := trimKeep(repo)
+	now := time.Now()
+	drops := 0
+	for _, line := range strings.Split(refLines, "\n") {
+		ref, _, _ := strings.Cut(line, "\x1f")
+		if !strings.HasPrefix(ref, "refs/jog/") || strings.HasPrefix(ref, "refs/jog/@trash/") {
+			continue
+		}
+		entries, err := listChain(repo, ref)
+		if err != nil {
+			continue
+		}
+		for _, k := range planTrim(keepFor, now, entries) {
+			if !k {
+				drops++
+			}
+		}
+	}
+
+	budget := trimMaxSize(repo)
+	overBudget := budget > 0 && size > budget
+	switch {
+	case drops > 0 && overBudget:
+		d.info("trim", fmt.Sprintf("%d %s older than %s, and over the size budget — `jog trim` drops them (--dry-run previews)",
+			drops, plural(drops, "snapshot"), humanDur(keepFor)))
+	case drops > 0:
+		d.info("trim", fmt.Sprintf("%d %s older than %s — `jog trim` drops them (--dry-run previews)",
+			drops, plural(drops, "snapshot"), humanDur(keepFor)))
+	case overBudget:
+		d.info("trim", "over the maxSize budget — `jog trim` drops oldest snapshots to fit (--dry-run previews)")
+	default:
+		d.info("trim", "nothing to drop — every snapshot is inside the keep window")
+	}
+}
+
+func plural(n int, word string) string {
+	if n == 1 {
+		return word
+	}
+	return word + "s"
 }
 
 // checkTriggers verifies something is actually invoking the engine: the
