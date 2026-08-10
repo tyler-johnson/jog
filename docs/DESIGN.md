@@ -394,6 +394,16 @@ Accepted gaps (documented, not defended):
    `--all` interleaved forest shipped in v1 M9 (PLAN-V1 D13).
 6. Windows: `--no-optional-locks`, exec semantics (no execve — spawn+exit-code
    proxy), path handling. Not a v0 target.
+   **Closed 2026-08-09:** shipped. `--no-optional-locks` was already on
+   every gitx read; passthrough is per-platform (`internal/cli/exec_*.go`
+   — execve on unix, a spawn+exit-code proxy with Ctrl-C ignored on
+   windows); editor hook paths know `~/vimfiles`, `%LOCALAPPDATA%\nvim`,
+   and `%APPDATA%` (Sublime/JetBrains); rendered assets bake
+   forward-slash jog paths so elisp/python/JS string literals stay
+   escape-free; doctor greps PowerShell profiles for the
+   `function git { jog git @args }` alias form. CI runs the full suite
+   on windows-latest, and goreleaser ships windows zips (amd64/arm64)
+   that `install.ps1` and `jog update` consume.
 
 ---
 

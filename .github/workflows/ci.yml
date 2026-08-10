@@ -7,7 +7,11 @@ on:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -16,3 +20,12 @@ jobs:
       - run: go vet ./...
       - run: go test ./...
       - run: go build ./...
+      # The installers can't run in CI, but they can at least parse.
+      - if: runner.os == 'Linux'
+        run: sh -n install.sh
+      - if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $errs = $null
+          [void][System.Management.Automation.Language.Parser]::ParseFile("$PWD/install.ps1", [ref]$null, [ref]$errs)
+          if ($errs) { $errs; exit 1 }

@@ -82,6 +82,9 @@ Pick the pitch that fits how you work:
 **1. Install the binary:**
 
 ```sh
+# install script (linux / macOS) — verifies checksums, lands in ~/.local/bin
+curl -fsSL https://raw.githubusercontent.com/tyler-johnson/jog/main/install.sh | sh
+
 # Homebrew (macOS / Linux)
 brew install tyler-johnson/tap/jog
 
@@ -89,8 +92,15 @@ brew install tyler-johnson/tap/jog
 go install github.com/tyler-johnson/jog/cmd/jog@latest
 ```
 
-Prebuilt binaries for linux/darwin (amd64/arm64) are on the
-[releases page](https://github.com/tyler-johnson/jog/releases).
+```powershell
+# Windows (PowerShell) — installs and adds jog to your user PATH
+irm https://raw.githubusercontent.com/tyler-johnson/jog/main/install.ps1 | iex
+```
+
+Prebuilt binaries for linux/darwin/windows (amd64/arm64) are on the
+[releases page](https://github.com/tyler-johnson/jog/releases). Script
+installs update themselves later with `jog update` (brew and go installs
+keep their own upgrade commands, and `jog update` says which).
 
 **2. Add the alias** — this is how you "remember" to snapshot: you don't.
 Muscle memory is the trigger; the compulsive `git status` tic becomes the
@@ -102,6 +112,11 @@ alias git='jog git'
 
 # fish
 alias git 'jog git'
+```
+
+```powershell
+# PowerShell (add to your profile — `notepad $PROFILE`)
+function git { jog git @args }
 ```
 
 Scripts, IDEs, and CI are untouched — they resolve `git` on PATH and get real
@@ -226,6 +241,7 @@ Two disjoint namespaces, one rule: **`jog git` is the only door to git.**
 | `jog doctor [--fix]` | verify invariants, wiring, and liveness (`--fix` repairs the gc config) |
 | `jog agents install` | hooks + skill for every agent client on this machine (`uninstall`, `list`; `[hooks\|skill]` and client names narrow it; `--project`: this repo) |
 | `jog editors install <name>` | a post-save snapshot hook for one text editor (`uninstall`, `list`) |
+| `jog update` | update jog to the latest release, sha256-verified (script/binary installs; brew and go installs are pointed at their own upgrade command) |
 | `jog version` | print jog's version |
 
 `--at` (and `since`'s target slot) accepts a snap id from `jog log` or a
