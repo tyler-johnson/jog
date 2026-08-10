@@ -93,6 +93,34 @@ func (r *Repo) RunRead(args ...string) (string, error) {
 	return r.Run(append([]string{"--no-optional-locks"}, args...)...)
 }
 
+// RunReadStdin is RunRead with input fed to git's stdin — for plumbing
+// that takes object lists via --stdin, where a long chain's worth of shas
+// would overflow argv.
+func (r *Repo) RunReadStdin(stdin string, args ...string) (string, error) {
+	args = append([]string{"--no-optional-locks"}, args...)
+	cmd := exec.Command("git", args...)
+	cmd.Dir = r.WorkDir
+	cmd.Env = append(os.Environ(), r.extraEnv...)
+	cmd.Stdin = strings.NewReader(stdin)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		code := -1
+		if cmd.ProcessState != nil {
+			code = cmd.ProcessState.ExitCode()
+		}
+		return "", &GitError{
+			Args:     args,
+			ExitCode: code,
+			Stdout:   strings.TrimSpace(stdout.String()),
+			Stderr:   strings.TrimSpace(stderr.String()),
+			cause:    err,
+		}
+	}
+	return strings.TrimSpace(stdout.String()), nil
+}
+
 // RunReadLoud is RunRead with git's stderr passed through to the user — for
 // commands whose warnings matter even on success (e.g. the reflog time-query
 // falling back to the oldest entry, which git reports on stderr with exit 0).
