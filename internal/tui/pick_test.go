@@ -50,3 +50,46 @@ func TestFrameInvariants(t *testing.T) {
 		check("confirm")
 	}
 }
+
+// TestPageKeys: pgup/pgdn page whichever frame has focus — the list jumps
+// by a page of rows (clamped at both ends), the preview scrolls as before.
+func TestPageKeys(t *testing.T) {
+	var items []PickItem
+	for i := 0; i < 100; i++ {
+		items = append(items, PickItem{ID: fmt.Sprintf("%07d", i), Label: fmt.Sprintf("row %d", i)})
+	}
+	m := pickModel{title: "t", items: items, preview: func(string) string { return strings.Repeat("x\n", 200) }, cache: map[int]string{}}
+	m.Init()
+	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+
+	page := m.listH()
+	if page < 2 {
+		t.Fatalf("test wants a multi-row list, got listH=%d", page)
+	}
+	m.Update(tea.KeyMsg{Type: tea.KeyPgDown})
+	if m.cursor != page {
+		t.Errorf("pgdown: cursor=%d, want %d", m.cursor, page)
+	}
+	m.Update(tea.KeyMsg{Type: tea.KeyPgUp})
+	if m.cursor != 0 {
+		t.Errorf("pgup: cursor=%d, want 0", m.cursor)
+	}
+	m.Update(tea.KeyMsg{Type: tea.KeyPgUp})
+	if m.cursor != 0 {
+		t.Errorf("pgup at top: cursor=%d, want clamp at 0", m.cursor)
+	}
+	for i := 0; i < 100; i++ {
+		m.Update(tea.KeyMsg{Type: tea.KeyPgDown})
+	}
+	if m.cursor != len(items)-1 {
+		t.Errorf("pgdown past end: cursor=%d, want clamp at %d", m.cursor, len(items)-1)
+	}
+
+	// Preview focus: the same keys scroll the preview, not the cursor.
+	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	cursorBefore, offBefore := m.cursor, m.offset
+	m.Update(tea.KeyMsg{Type: tea.KeyPgDown})
+	if m.cursor != cursorBefore || m.offset <= offBefore {
+		t.Errorf("pgdown in diff: cursor=%d offset=%d, want cursor unchanged and offset advanced", m.cursor, m.offset)
+	}
+}

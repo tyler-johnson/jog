@@ -34,10 +34,10 @@ var (
 // aborting must always be the safe, obvious exit.
 //
 // One frame is focused at a time: ↑/↓ (or j/k) move the list or scroll the
-// preview depending on focus, enter focuses the preview, esc returns to
-// the list (and quits from it). r chooses and q quits from either frame —
-// no pgup/pgdn or fn-layer keys required (they still scroll the preview
-// for keyboards that have them).
+// preview depending on focus, and pgup/pgdn (or ctrl+u/ctrl+d) do the
+// same a page at a time. enter focuses the preview, esc returns to the
+// list (and quits from it). r chooses and q quits from either frame — the
+// fn-layer keys are never required, only faster.
 //
 // On short windows (SSH from a phone) the frames become separate
 // full-screen views instead of a split — the same keys, but only the
@@ -115,9 +115,17 @@ func (m *pickModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.offset = 0
 			}
 		case "pgdown", "ctrl+d":
-			m.scroll(m.previewH() - 1)
+			if m.focusDiff {
+				m.scroll(m.previewH() - 1)
+			} else {
+				m.jump(m.listH())
+			}
 		case "pgup", "ctrl+u":
-			m.scroll(-(m.previewH() - 1))
+			if m.focusDiff {
+				m.scroll(-(m.previewH() - 1))
+			} else {
+				m.jump(-m.listH())
+			}
 		case "enter":
 			m.focusDiff = true
 		case "esc":
@@ -259,6 +267,20 @@ func (m *pickModel) previewLines() []string {
 func (m *pickModel) previewH() int {
 	_, previewH := m.layout()
 	return previewH
+}
+
+func (m *pickModel) listH() int {
+	listH, _ := m.layout()
+	return listH
+}
+
+// jump moves the list cursor by a page-sized delta, clamped to the ends.
+func (m *pickModel) jump(delta int) {
+	if len(m.items) == 0 {
+		return
+	}
+	m.cursor = max(0, min(m.cursor+delta, len(m.items)-1))
+	m.offset = 0
 }
 
 func (m *pickModel) scroll(delta int) {
