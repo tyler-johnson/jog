@@ -14,8 +14,8 @@ import (
 // Mask host git config so gitx-spawned commands behave identically on every
 // machine (testrepo does the same for its own commands).
 func maskHostConfig(t *testing.T) {
-	t.Setenv("GIT_CONFIG_GLOBAL", "/dev/null")
-	t.Setenv("GIT_CONFIG_SYSTEM", "/dev/null")
+	t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
+	t.Setenv("GIT_CONFIG_SYSTEM", os.DevNull)
 }
 
 func TestDiscover(t *testing.T) {

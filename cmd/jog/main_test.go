@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"testing"
@@ -16,9 +17,16 @@ import (
 )
 
 // End-to-end tests run the compiled binary: passthrough replaces the process
-// via exec, so it can only be observed from outside.
+// (unix) or proxies the child's exit code (windows), so it can only be
+// observed from outside.
 
-var jogBin string
+var (
+	jogBin string
+	// gitOnlyPath is a PATH holding only git's own directory — fake-home
+	// tests use it so no real jog/claude/editor binary can be found while
+	// git still resolves, on any OS.
+	gitOnlyPath string
+)
 
 func TestMain(m *testing.M) {
 	dir, err := os.MkdirTemp("", "jogbin")
@@ -27,12 +35,46 @@ func TestMain(m *testing.M) {
 	}
 	defer os.RemoveAll(dir)
 	jogBin = filepath.Join(dir, "jog")
+	if runtime.GOOS == "windows" {
+		jogBin += ".exe"
+	}
 	out, err := exec.Command("go", "build", "-o", jogBin, ".").CombinedOutput()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "building jog: %v\n%s", err, out)
 		os.Exit(1)
 	}
+	gitPath, err := exec.LookPath("git")
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "tests need git on PATH")
+		os.Exit(1)
+	}
+	gitOnlyPath = filepath.Dir(gitPath)
 	os.Exit(m.Run())
+}
+
+// vimPluginPath mirrors the per-OS vim runtime root the editors package
+// uses: ~/.vim everywhere except Windows's ~/vimfiles.
+func vimPluginPath(home string) string {
+	root := ".vim"
+	if runtime.GOOS == "windows" {
+		root = "vimfiles"
+	}
+	return filepath.Join(home, root, "plugin", "jog.vim")
+}
+
+// fakeHome returns env entries that relocate the home directory and hide
+// any real jog/agent/editor installs, portably: HOME for unix tools and
+// git, USERPROFILE for os.UserHomeDir on windows, the AppData roots kept
+// inside the sandbox, and a PATH holding only git's directory.
+func fakeHome(home string) []string {
+	return []string{
+		"HOME=" + home,
+		"USERPROFILE=" + home,
+		"XDG_CONFIG_HOME=",
+		"APPDATA=" + filepath.Join(home, "AppData", "Roaming"),
+		"LOCALAPPDATA=" + filepath.Join(home, "AppData", "Local"),
+		"PATH=" + gitOnlyPath,
+	}
 }
 
 func runJog(t *testing.T, dir string, args ...string) (stdout, stderr string, code int) {
@@ -52,7 +94,7 @@ func runJogStdin(t *testing.T, dir, stdin string, args ...string) (stdout, stder
 	cmd.Dir = dir
 	cmd.Stdin = strings.NewReader(stdin)
 	cmd.Env = append(os.Environ(),
-		"GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_SYSTEM=/dev/null",
+		"GIT_CONFIG_GLOBAL="+os.DevNull, "GIT_CONFIG_SYSTEM="+os.DevNull,
 		"GIT_AUTHOR_NAME=test", "GIT_AUTHOR_EMAIL=test@example.com",
 		"GIT_COMMITTER_NAME=test", "GIT_COMMITTER_EMAIL=test@example.com",
 	)
@@ -323,6 +365,21 @@ func TestVersion(t *testing.T) {
 	stdout, _, code := runJogAsGit(t, dir, "version")
 	if code != 0 || !strings.Contains(stdout, "git version") {
 		t.Errorf("aliased git version: code=%d stdout=%q", code, stdout)
+	}
+}
+
+// TestUpdateSourceBuild: the test binary is a source build, so update
+// must refuse with the go-install pointer — before any network touch,
+// which is why this test can run offline.
+func TestUpdateSourceBuild(t *testing.T) {
+	dir := t.TempDir()
+	_, stderr, code := runJog(t, dir, "update")
+	if code != 1 || !strings.Contains(stderr, "go install github.com/tyler-johnson/jog/cmd/jog@latest") {
+		t.Errorf("update on a source build: code=%d stderr=%q", code, stderr)
+	}
+	_, stderr, code = runJog(t, dir, "update", "--bogus")
+	if code != 2 || !strings.Contains(stderr, "usage") {
+		t.Errorf("update with args: code=%d stderr=%q", code, stderr)
 	}
 }
 
@@ -685,7 +742,7 @@ func runJogEnv(t *testing.T, dir string, extraEnv []string, args ...string) (std
 	cmd := exec.Command(jogBin, args...)
 	cmd.Dir = dir
 	cmd.Env = append(append(os.Environ(),
-		"GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_SYSTEM=/dev/null",
+		"GIT_CONFIG_GLOBAL="+os.DevNull, "GIT_CONFIG_SYSTEM="+os.DevNull,
 		"GIT_AUTHOR_NAME=test", "GIT_AUTHOR_EMAIL=test@example.com",
 		"GIT_COMMITTER_NAME=test", "GIT_COMMITTER_EMAIL=test@example.com",
 	), extraEnv...)
@@ -716,13 +773,14 @@ func TestDoctor(t *testing.T) {
 		t.Fatal(err)
 	}
 	// An editor hook is a trigger too — doctor should report it.
-	if err := os.MkdirAll(filepath.Join(home, ".vim", "plugin"), 0o755); err != nil {
+	vimHook := vimPluginPath(home)
+	if err := os.MkdirAll(filepath.Dir(vimHook), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(home, ".vim", "plugin", "jog.vim"), []byte("\" jog\n"), 0o644); err != nil {
+	if err := os.WriteFile(vimHook, []byte("\" jog\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	env := []string{"HOME=" + home, "XDG_CONFIG_HOME=", "PATH=/usr/bin:/bin"}
+	env := fakeHome(home)
 
 	// Engine never run: the loudest finding doctor exists for.
 	tr := testrepo.New(t)
@@ -789,7 +847,7 @@ func TestDoctor(t *testing.T) {
 	tr2.Write("a.txt", "one\n")
 	tr2.Commit("base")
 	runJog(t, tr2.Dir, "-m", "first")
-	stdout, _, code = runJogEnv(t, tr2.Dir, []string{"HOME=" + bare}, "doctor")
+	stdout, _, code = runJogEnv(t, tr2.Dir, fakeHome(bare), "doctor")
 	if code != 1 || !strings.Contains(stdout, "neither the alias nor agent/editor hooks") {
 		t.Errorf("no triggers: code=%d\n%s", code, stdout)
 	}
@@ -1173,7 +1231,7 @@ func TestVerbAliases(t *testing.T) {
 // --help) belongs to real git. (TestHelp covers the global forms.)
 func TestPerCommandHelp(t *testing.T) {
 	dir := t.TempDir() // outside any repo: help must not need one
-	verbs := []string{"log", "snaps", "pick", "since", "restore", "back", "trim", "config", "doctor", "hook", "agents", "agent", "editors", "editor", "editor-hook"}
+	verbs := []string{"log", "snaps", "pick", "since", "restore", "back", "trim", "config", "doctor", "hook", "agents", "agent", "editors", "editor", "editor-hook", "update"}
 	for _, v := range verbs {
 		stdout, _, code := runJog(t, dir, v, "--help")
 		if code != 0 || !strings.Contains(stdout, "usage:") || !strings.Contains(stdout, v) {
@@ -1259,7 +1317,7 @@ func TestAgents(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(home, ".claude"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	env := []string{"HOME=" + home, "PATH=/usr/bin:/bin"}
+	env := fakeHome(home)
 	dir := t.TempDir()
 	settings := filepath.Join(home, ".claude", "settings.json")
 	skillPath := filepath.Join(home, ".claude", "skills", "jog", "SKILL.md")
@@ -1404,7 +1462,7 @@ func TestAgentsCodex(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(home, ".codex"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	env := []string{"HOME=" + home, "PATH=/usr/bin:/bin"}
+	env := fakeHome(home)
 	dir := t.TempDir()
 	hooksPath := filepath.Join(home, ".codex", "hooks.json")
 	skillPath := filepath.Join(home, ".agents", "skills", "jog", "SKILL.md")
@@ -1501,7 +1559,7 @@ func TestAgentsMoreClients(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	env := []string{"HOME=" + home, "PATH=/usr/bin:/bin"}
+	env := fakeHome(home)
 	dir := t.TempDir()
 
 	// A pre-existing foreign Cursor hook must survive everything below.
@@ -1612,7 +1670,7 @@ func TestAgentsMoreClients(t *testing.T) {
 // malformed settings are a hard error that never rewrites the file.
 func TestAgentsDetectionAndScope(t *testing.T) {
 	home := t.TempDir() // no ~/.claude, and PATH below carries no claude binary
-	env := []string{"HOME=" + home, "PATH=/usr/bin:/bin"}
+	env := fakeHome(home)
 	dir := t.TempDir()
 
 	stdout, _, code := runJogEnv(t, dir, env, "agents", "install")
@@ -1669,7 +1727,7 @@ func TestAgentsDetectionAndScope(t *testing.T) {
 // structures jog emptied are pruned.
 func TestAgentsUninstallSurgical(t *testing.T) {
 	home := t.TempDir()
-	env := []string{"HOME=" + home}
+	env := fakeHome(home)
 	dir := t.TempDir()
 	path := filepath.Join(home, ".claude", "settings.json")
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
@@ -1733,9 +1791,9 @@ func TestAgentsUninstallSurgical(t *testing.T) {
 // teaches, uninstall refuses an edited file and removes a pristine one.
 func TestEditors(t *testing.T) {
 	home := t.TempDir()
-	env := []string{"HOME=" + home, "XDG_CONFIG_HOME=", "PATH=/usr/bin:/bin"}
+	env := fakeHome(home)
 	dir := t.TempDir()
-	hookFile := filepath.Join(home, ".vim", "plugin", "jog.vim")
+	hookFile := vimPluginPath(home)
 
 	stdout, stderr, code := runJogEnv(t, dir, env, "editors", "install", "vim")
 	if code != 0 {
@@ -1761,8 +1819,10 @@ func TestEditors(t *testing.T) {
 		t.Errorf("reinstall: code=%d\n%s", code, stdout)
 	}
 
+	// TildePath renders home-relative with forward slashes on every OS.
+	tildeHook := "~/" + filepath.ToSlash(strings.TrimPrefix(hookFile, home+string(filepath.Separator)))
 	stdout, _, code = runJogEnv(t, dir, env, "editors", "list")
-	if code != 0 || !strings.Contains(stdout, "~/.vim/plugin/jog.vim") || !strings.Contains(stdout, "✓ installed") {
+	if code != 0 || !strings.Contains(stdout, tildeHook) || !strings.Contains(stdout, "✓ installed") {
 		t.Errorf("list after install:\n%s", stdout)
 	}
 
@@ -1811,7 +1871,7 @@ func TestEditors(t *testing.T) {
 // zero, several, and unknown names are each usage errors that say so.
 func TestEditorsExactlyOne(t *testing.T) {
 	home := t.TempDir()
-	env := []string{"HOME=" + home, "XDG_CONFIG_HOME=", "PATH=/usr/bin:/bin"}
+	env := fakeHome(home)
 	dir := t.TempDir()
 
 	_, stderr, code := runJogEnv(t, dir, env, "editors", "install")
@@ -1837,7 +1897,7 @@ func TestEditorsExactlyOne(t *testing.T) {
 // exactly jog's watcher and uninstall removes exactly it.
 func TestEditorsJetBrains(t *testing.T) {
 	home := t.TempDir()
-	env := []string{"HOME=" + home, "XDG_CONFIG_HOME=", "PATH=/usr/bin:/bin"}
+	env := fakeHome(home)
 
 	// Not a repo: refused with the .idea story.
 	_, stderr, code := runJogEnv(t, t.TempDir(), env, "editors", "install", "jetbrains")
@@ -1967,7 +2027,7 @@ func TestEditorsVSCode(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(home, ".vscode-server"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	env := []string{"HOME=" + home, "XDG_CONFIG_HOME=", "PATH=/usr/bin:/bin"}
+	env := fakeHome(home)
 	dir := t.TempDir()
 	desktop := filepath.Join(home, ".vscode", "extensions", "jog.jog-0.0.1")
 	server := filepath.Join(home, ".vscode-server", "extensions", "jog.jog-0.0.1")

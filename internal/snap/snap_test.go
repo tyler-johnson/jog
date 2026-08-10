@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -18,8 +19,8 @@ import (
 
 func setup(t *testing.T) (*testrepo.Repo, *gitx.Repo) {
 	t.Helper()
-	t.Setenv("GIT_CONFIG_GLOBAL", "/dev/null")
-	t.Setenv("GIT_CONFIG_SYSTEM", "/dev/null")
+	t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
+	t.Setenv("GIT_CONFIG_SYSTEM", os.DevNull)
 	tr := testrepo.New(t)
 	r, err := gitx.Discover(tr.Dir)
 	if err != nil {
@@ -259,6 +260,9 @@ func TestSnapshotEmbeddedRepo(t *testing.T) {
 
 // 9 — exec bit and symlinks preserved (100755 / 120000).
 func TestSnapshotModes(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("exec bits and symlinks are POSIX tree modes")
+	}
 	tr, r := setup(t)
 	tr.Write("script.sh", "#!/bin/sh\n")
 	if err := os.Chmod(filepath.Join(tr.Dir, "script.sh"), 0o755); err != nil {
@@ -434,8 +438,8 @@ func TestSnapshotSlashBranch(t *testing.T) {
 
 // Bare repos: nothing to snapshot, distinct error.
 func TestSnapshotBareRepo(t *testing.T) {
-	t.Setenv("GIT_CONFIG_GLOBAL", "/dev/null")
-	t.Setenv("GIT_CONFIG_SYSTEM", "/dev/null")
+	t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
+	t.Setenv("GIT_CONFIG_SYSTEM", os.DevNull)
 	dir := t.TempDir()
 	r0 := &gitx.Repo{WorkDir: dir}
 	if _, err := r0.Run("init", "-q", "--bare", "."); err != nil {

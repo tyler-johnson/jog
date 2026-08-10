@@ -66,8 +66,8 @@ func TestEditorHookNoFile(t *testing.T) {
 }
 
 func TestEditorHookOutsideRepoSilent(t *testing.T) {
-	t.Setenv("GIT_CONFIG_GLOBAL", "/dev/null")
-	t.Setenv("GIT_CONFIG_SYSTEM", "/dev/null")
+	t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
+	t.Setenv("GIT_CONFIG_SYSTEM", os.DevNull)
 	dir := t.TempDir()
 	file := filepath.Join(dir, "loose.txt")
 	if err := os.WriteFile(file, []byte("x\n"), 0o644); err != nil {

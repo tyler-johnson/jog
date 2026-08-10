@@ -1,0 +1,3 @@
+# LF everywhere, including Windows checkouts: go:embed-ed assets and
+# golden strings must be byte-identical across the CI matrix.
+* text=auto eol=lf
