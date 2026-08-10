@@ -9,8 +9,29 @@ import (
 
 	"github.com/tyler-johnson/jog/internal/gitx"
 	"github.com/tyler-johnson/jog/internal/provenance"
+	"github.com/tyler-johnson/jog/internal/selfupdate"
 	"github.com/tyler-johnson/jog/internal/snap"
 )
+
+// version is the running build's module version, threaded from main so
+// human-facing commands can decide whether an update notice is due.
+// Source builds never match a release version, which keeps the whole
+// notice machinery inert for them.
+var version string
+
+// SetVersion records the build version main resolved at startup.
+func SetVersion(v string) { version = v }
+
+// updateNotice prints a pending once-per-release update notice, if any.
+// Called only from human-facing commands, after their own output —
+// never from hooks, and never ahead of the user's command.
+func updateNotice() {
+	selfupdate.MaybeSpawnCheck(version)
+	if notice := selfupdate.Pending(version); notice != "" {
+		fmt.Fprintln(os.Stderr, notice)
+		selfupdate.MarkNotified()
+	}
+}
 
 // Snapshot is bare `jog` / `jog -m "msg"`: a deliberate checkpoint.
 func Snapshot(message string) int {
@@ -38,6 +59,7 @@ func Snapshot(message string) int {
 			fmt.Println("  " + l)
 		}
 	}
+	updateNotice()
 	return 0
 }
 
@@ -83,5 +105,31 @@ func Passthrough(gitArgs []string) int {
 		// `git clone`, `git version` outside repos must feel exactly like git.
 	}
 
+	// The rare update notice rides the passthrough, strictly after git's
+	// own output — which the unix execve handoff cannot do. So only when a
+	// notice is actually pending and the verb is safe to proxy, git runs
+	// as a child instead; every other invocation keeps the exec.
+	selfupdate.MaybeSpawnCheck(version)
+	if notice := selfupdate.Pending(version); notice != "" && deferrable(gitArgs) {
+		code := runGitChild(gitArgs)
+		fmt.Fprintln(os.Stderr, notice)
+		selfupdate.MarkNotified()
+		return code
+	}
 	return execGit(gitArgs)
+}
+
+// deferrable lists the git verbs safe to run as a child for the notice's
+// sake: common, short-lived, non-interactive. A flag-first or unknown
+// invocation execs as always — the notice just waits for the next
+// `git status` tic.
+func deferrable(gitArgs []string) bool {
+	if len(gitArgs) == 0 {
+		return false
+	}
+	switch gitArgs[0] {
+	case "status", "diff", "log", "branch", "fetch", "pull", "push":
+		return true
+	}
+	return false
 }

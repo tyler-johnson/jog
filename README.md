@@ -100,7 +100,9 @@ irm https://raw.githubusercontent.com/tyler-johnson/jog/main/install.ps1 | iex
 Prebuilt binaries for linux/darwin/windows (amd64/arm64) are on the
 [releases page](https://github.com/tyler-johnson/jog/releases). Script
 installs update themselves later with `jog update` (brew and go installs
-keep their own upgrade commands, and `jog update` says which).
+keep their own upgrade commands, and `jog update` says which). jog also
+checks weekly in the background and mentions a new release once, after a
+git command; `jog config updateCheck false` opts out.
 
 **2. Add the alias** — this is how you "remember" to snapshot: you don't.
 Muscle memory is the trigger; the compulsive `git status` tic becomes the
@@ -391,6 +393,7 @@ validated through git's own parsers:
 | `jog.maxFileSize` | `50m` | skip new files larger than this (`0` disables the guard) |
 | `jog.keep` | `90.days` | `jog trim` drops snapshots older than this (`never` keeps everything) |
 | `jog.maxSize` | `0` (off) | total disk budget for snapshots — `jog trim` drops oldest first until the estimate fits (one snapshot lenient) |
+| `jog.updateCheck` | `true` | weekly background release check, plus a one-line notice once per release after a git command (`false` disables both) |
 | `gc.refs/jog/*.reflogExpire` | `never` | set by jog on first snapshot; keeps gc off jog's reflogs |
 | `gc.refs/jog/*.reflogExpireUnreachable` | `never` | same |
 

@@ -18,18 +18,24 @@ import (
 	"time"
 )
 
-const usageLine = "jog: usage: jog update"
+const usageLine = "jog: usage: jog update [--check]"
 
 // Run is the `jog update` entry point. version is the module version Go
 // embedded at build time ("vX.Y.Z" for tagged builds, "(devel)" or a
-// pseudo-version otherwise).
+// pseudo-version otherwise). `--check` is the background refresh
+// MaybeSpawnCheck runs: rewrite the cache file, exit 0 silently either
+// way — nothing is ever installed on that path.
 func Run(args []string, version string) int {
-	if len(args) > 0 {
+	check := len(args) == 1 && args[0] == "--check"
+	if len(args) > 0 && !check {
 		fmt.Fprintln(os.Stderr, usageLine)
 		return 2
 	}
 	exe, err := os.Executable()
 	if err != nil {
+		if check {
+			return 0
+		}
 		fmt.Fprintf(os.Stderr, "jog: cannot locate the running binary: %v\n", err)
 		return 1
 	}
@@ -47,6 +53,10 @@ func Run(args []string, version string) int {
 		Version: version,
 		Out:     os.Stdout,
 		Err:     os.Stderr,
+	}
+	if check {
+		u.RefreshCache()
+		return 0
 	}
 	return u.Run()
 }
@@ -146,13 +156,20 @@ func classifyInstall(version, exe string) string {
 	if !releaseVersion.MatchString(version) {
 		return "jog was built from source — update with: go install github.com/tyler-johnson/jog/cmd/jog@latest"
 	}
+	if isBrewInstall(exe) {
+		return "jog was installed with Homebrew — update with: brew upgrade jog"
+	}
+	return ""
+}
+
+func isBrewInstall(exe string) bool {
 	p := filepath.ToSlash(exe)
 	for _, brew := range []string{"/Cellar/", "/opt/homebrew/", "/home/linuxbrew/"} {
 		if strings.Contains(p, brew) {
-			return "jog was installed with Homebrew — update with: brew upgrade jog"
+			return true
 		}
 	}
-	return ""
+	return false
 }
 
 // isNewer reports whether latest is strictly newer than current; both

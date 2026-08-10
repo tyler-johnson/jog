@@ -81,9 +81,22 @@ func fakeHome(home string) []string {
 		"HOME=" + home,
 		"USERPROFILE=" + home,
 		"XDG_CONFIG_HOME=",
+		"XDG_CACHE_HOME=",
 		"APPDATA=" + filepath.Join(home, "AppData", "Roaming"),
 		"LOCALAPPDATA=" + filepath.Join(home, "AppData", "Local"),
 		"PATH=" + gitOnlyPath,
+	}
+}
+
+// fakeCacheDir is where os.UserCacheDir lands inside a fakeHome, per-OS.
+func fakeCacheDir(home string) string {
+	switch runtime.GOOS {
+	case "windows":
+		return filepath.Join(home, "AppData", "Local")
+	case "darwin":
+		return filepath.Join(home, "Library", "Caches")
+	default:
+		return filepath.Join(home, ".cache")
 	}
 }
 
@@ -193,6 +206,30 @@ func TestPassthroughOutsideRepo(t *testing.T) {
 	}
 	if strings.Contains(stderr, "jog") {
 		t.Errorf("jog noise on failing git outside a repo: %q", stderr)
+	}
+}
+
+// Even with a cached newer release, piped passthrough output stays
+// byte-clean: the update notice is TTY-gated (and the test binary is a
+// source build, which alone keeps the notice machinery inert).
+func TestPassthroughNoNoticeWhenPiped(t *testing.T) {
+	tr := testrepo.New(t)
+	tr.Write("a.txt", "x\n")
+	tr.Commit("first")
+
+	home := t.TempDir()
+	cache := filepath.Join(fakeCacheDir(home), "jog")
+	if err := os.MkdirAll(cache, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	seed := `{"checked_at":"2099-01-01T00:00:00Z","latest":"v99.0.0"}`
+	if err := os.WriteFile(filepath.Join(cache, "update.json"), []byte(seed), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	tr.Write("b.txt", "so the snapshot isn't a no-op\n")
+	_, stderr, code := runJogEnv(t, tr.Dir, fakeHome(home), "git", "status", "--porcelain")
+	if code != 0 || stderr != "" {
+		t.Errorf("piped passthrough with a seeded cache: code=%d stderr=%q", code, stderr)
 	}
 }
 
@@ -810,6 +847,12 @@ func TestDoctor(t *testing.T) {
 	if !strings.Contains(stdout, "no findings") || !strings.Contains(stdout, "claude hooks") ||
 		!strings.Contains(stdout, "claude skill") || !strings.Contains(stdout, "vim editor") {
 		t.Errorf("healthy output:\n%s", stdout)
+	}
+	// The update line: the test binary is a source build, so doctor says
+	// so — the cache-driven wordings are covered by selfupdate's unit
+	// tests, where the version is injectable.
+	if !strings.Contains(stdout, "source build") {
+		t.Errorf("update line missing:\n%s", stdout)
 	}
 
 	// Disk + trim visibility: the cost line is always there; a fresh chain

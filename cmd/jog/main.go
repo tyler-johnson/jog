@@ -272,13 +272,21 @@ meant to be run by hand.
 	"update": `jog update — update jog to the latest release
 
 usage:
-  jog update
+  jog update           install the latest release
+  jog update --check   refresh the update cache only, silently
 
 Checks GitHub for the newest jog release, downloads this platform's
 binary, verifies its sha256 against the release's checksums.txt, and
 replaces the running executable in place. Prints "already up to date"
 when there is nothing newer. Nothing else changes — settings, hooks,
 and snapshots are untouched by an update.
+
+jog also checks on its own: at most weekly, a background
+` + "`jog update --check`" + ` refreshes a small cache in your user cache
+directory, and when it finds a newer release, one line prints after a
+git command — once per release, only on a terminal, never from hooks.
+` + "`jog config updateCheck false`" + ` turns the checks and notices off.
+--check only rewrites the cache; it never installs anything.
 
 Installs that belong to another tool are recognized and left alone:
 a jog built from source is updated with
@@ -334,6 +342,10 @@ func printHelp(verb string) int {
 }
 
 func run(args []string) int {
+	// Human-facing cli commands use the version to decide whether an
+	// update notice is due; resolving it here keeps cli free of
+	// runtime/debug.
+	cli.SetVersion(moduleVersion())
 	if len(args) == 0 {
 		return cli.Snapshot("")
 	}

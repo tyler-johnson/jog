@@ -12,6 +12,7 @@ import (
 	"github.com/tyler-johnson/jog/internal/agents"
 	"github.com/tyler-johnson/jog/internal/editors"
 	"github.com/tyler-johnson/jog/internal/gitx"
+	"github.com/tyler-johnson/jog/internal/selfupdate"
 	"github.com/tyler-johnson/jog/internal/snap"
 )
 
@@ -58,6 +59,7 @@ func Doctor(args []string) int {
 		d.checkRepo(repo, fix)
 	}
 	d.checkTriggers()
+	d.checkUpdate()
 
 	if d.findings == 0 {
 		fmt.Println("\n" + styleGood.Render("no findings — the net is under you"))
@@ -321,6 +323,15 @@ func (d *doctor) checkTriggers() {
 	if !hooks && aliasFile == "" {
 		d.warn("triggers", "neither the alias nor agent/editor hooks are wired — snapshots only happen when you run `jog` by hand (`jog agents install`, `jog editors install <name>`, or add the alias)")
 	}
+}
+
+// checkUpdate reports the cached release check — repo-independent, like
+// the trigger checks, and informational either way: an available update
+// is news, not a finding. Doctor also spawns the background refresh, so
+// a second run reports fresh data.
+func (d *doctor) checkUpdate() {
+	selfupdate.MaybeSpawnCheck(version)
+	d.info("update", selfupdate.CheckStatus(version))
 }
 
 func humanAge(d time.Duration) string {

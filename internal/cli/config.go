@@ -22,7 +22,7 @@ import (
 type configOption struct {
 	key  string // full git config key
 	def  string // raw default value, as git would print it
-	kind string // "int" (git int, k/m/g suffixes ok) or "expiry" (git expiry syntax)
+	kind string // "int" (git int, k/m/g suffixes ok), "expiry" (git expiry syntax), or "bool"
 	desc string // pre-wrapped description lines
 }
 
@@ -50,6 +50,12 @@ var configOptions = []configOption{
 			"below keep — until the estimate fits, one snapshot leniently (the\n" +
 			"snapshot that crosses the budget survives). 0 = no budget (the\n" +
 			"default). Suffixes work: 500M, 2G.",
+	},
+	{
+		key: "jog.updateCheck", def: "true", kind: "bool",
+		desc: "Whether jog looks for new releases: a background check at most\n" +
+			"weekly, and a one-line notice after a git command, at most once per\n" +
+			"release. false turns the checks and the notices off entirely.",
 	},
 }
 
@@ -189,9 +195,13 @@ func validateValue(opt configOption, value string) error {
 	}
 	typeFlag := "--type=int"
 	example := "a byte count like 52428800, 100M, or 0"
-	if opt.kind == "expiry" {
+	switch opt.kind {
+	case "expiry":
 		typeFlag = "--type=expiry-date"
 		example = "git expiry syntax like 3.days, 2.weeks, or never"
+	case "bool":
+		typeFlag = "--type=bool"
+		example = "true or false"
 	}
 	if _, err := gitConfig("--file", f, typeFlag, "--get", opt.key); err != nil {
 		return fmt.Errorf("%q is not a valid value for %s (want %s)", value, opt.name(), example)
