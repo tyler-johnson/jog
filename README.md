@@ -37,24 +37,17 @@ restored to c0ffee1 (2 minutes ago — pre: git status): 14 restored, 0 deleted
 
 ## Why jog
 
-Git never loses a commit, but it holds no opinion about work you
-haven't committed yet. The working tree is a disposable scratchpad, and
-git's sharpest tools assume you mean it: `checkout -f` and
-`reset --hard` don't ask twice, and muscle memory is exactly how they
-get typed at the wrong moment. Now add a coding agent with its own
-ideas about which files are obsolete.
+Git protects your commits, but it has never protected your working
+tree. Losing uncommitted work to a wrong command was always a human
+hazard, and now coding agents have made it common.
 
-jog is a write-ahead log for your working tree. A beat before every git
-command, agent tool call, or editor save, it captures the whole tree,
-untracked files included, as ordinary git commits under
-`refs/jog/<branch>`. Each snapshot names the command it ran ahead of,
-so the timeline reads as an operation log, not a smear of autosaves:
-"the tree as it stood when claude ran `go test`". jog doesn't try to
-prevent mistakes — it makes them reversible.
+Inspired by [jj], jog snapshots the tree before every git command, agent
+tool call, and editor save, running silently inside the workflow you
+already have.
 
-The model is borrowed with admiration from [jj], which snapshots before
-every command; jog just makes the commands the git you already type, in
-the repos you already have.
+It's an insurance policy for your code: invisible until you need it,
+invaluable when you do. Every mistake against the working tree becomes
+reversible.
 
 [jj]: https://github.com/jj-vcs/jj
 
