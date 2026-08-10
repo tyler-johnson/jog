@@ -192,8 +192,11 @@ var jetbrainsEditor = editor{
 	name:  "jetbrains",
 	title: "JetBrains IDEs",
 	detect: func() bool {
-		if runtime.GOOS == "darwin" {
+		switch runtime.GOOS {
+		case "darwin":
 			return exists(install.HomePath("Library", "Application Support", "JetBrains"))
+		case "windows":
+			return exists(roamingAppData("JetBrains"))
 		}
 		return exists(xdgConfig("JetBrains")) || exists(install.HomePath(".local", "share", "JetBrains"))
 	},

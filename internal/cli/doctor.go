@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -296,8 +297,16 @@ func (d *doctor) checkTriggers() {
 	}
 
 	aliasFile := ""
-	for _, rc := range []string{".bashrc", ".zshrc", ".config/fish/config.fish", ".profile"} {
-		b, err := os.ReadFile(filepath.Join(home, rc))
+	rcs := []string{".bashrc", ".zshrc", ".config/fish/config.fish", ".profile"}
+	if runtime.GOOS == "windows" {
+		// PowerShell's `function git { jog git @args }` lives in the
+		// profile; both the modern and Windows-PowerShell locations count.
+		rcs = append(rcs,
+			"Documents/PowerShell/Microsoft.PowerShell_profile.ps1",
+			"Documents/WindowsPowerShell/Microsoft.PowerShell_profile.ps1")
+	}
+	for _, rc := range rcs {
+		b, err := os.ReadFile(filepath.Join(home, filepath.FromSlash(rc)))
 		if err == nil && strings.Contains(string(b), "jog git") {
 			aliasFile = "~/" + rc
 			break

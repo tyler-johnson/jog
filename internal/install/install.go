@@ -159,16 +159,19 @@ const JogSlot = "{{JOG}}"
 
 // JogPath resolves how an installed asset should invoke jog on this
 // machine: the PATH location when there is one (survives in-place
-// upgrades), else this binary's own path, else the bare name.
+// upgrades), else this binary's own path, else the bare name. Always
+// forward slashes — a backslash path baked into an elisp/python/JS string
+// literal would act as escape characters, and Windows accepts slashed
+// absolute paths everywhere jog renders them.
 func JogPath() string {
 	if p, err := exec.LookPath("jog"); err == nil {
 		if abs, err := filepath.Abs(p); err == nil {
-			return abs
+			return filepath.ToSlash(abs)
 		}
-		return p
+		return filepath.ToSlash(p)
 	}
 	if exe, err := os.Executable(); err == nil {
-		return exe
+		return filepath.ToSlash(exe)
 	}
 	return "jog"
 }

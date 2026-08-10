@@ -17,8 +17,20 @@ import (
 var sublimeAsset []byte
 
 func sublimeUserDir() (string, error) {
-	if runtime.GOOS == "darwin" {
+	switch runtime.GOOS {
+	case "darwin":
 		return install.HomePath("Library", "Application Support", "Sublime Text", "Packages", "User")
+	case "windows":
+		st4, err := roamingAppData("Sublime Text")
+		if err != nil {
+			return "", err
+		}
+		if !install.FileExists(st4) {
+			if st3, err := roamingAppData("Sublime Text 3"); err == nil && install.FileExists(st3) {
+				return filepath.Join(st3, "Packages", "User"), nil
+			}
+		}
+		return filepath.Join(st4, "Packages", "User"), nil
 	}
 	st4, err := xdgConfig("sublime-text")
 	if err != nil {

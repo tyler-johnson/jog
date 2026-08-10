@@ -250,6 +250,25 @@ func xdgConfig(elems ...string) (string, error) {
 	return install.HomePath(append([]string{".config"}, elems...)...)
 }
 
+// roamingAppData joins elems under %APPDATA% — the Windows equivalent of
+// ~/.config for editors that roam their settings (Sublime, JetBrains).
+// Falls back to the conventional location under home when the variable is
+// unset (bare test environments).
+func roamingAppData(elems ...string) (string, error) {
+	if a := os.Getenv("APPDATA"); a != "" {
+		return filepath.Join(append([]string{a}, elems...)...), nil
+	}
+	return install.HomePath(append([]string{"AppData", "Roaming"}, elems...)...)
+}
+
+// localAppData is roamingAppData for %LOCALAPPDATA% (nvim lives there).
+func localAppData(elems ...string) (string, error) {
+	if a := os.Getenv("LOCALAPPDATA"); a != "" {
+		return filepath.Join(append([]string{a}, elems...)...), nil
+	}
+	return install.HomePath(append([]string{"AppData", "Local"}, elems...)...)
+}
+
 func exists(path string, err error) bool {
 	return err == nil && install.FileExists(path)
 }

@@ -2,9 +2,31 @@ package editors
 
 import (
 	_ "embed"
+	"os"
+	"runtime"
 
 	"github.com/tyler-johnson/jog/internal/install"
 )
+
+// vimDir is vim's user runtime root: ~/.vim everywhere except Windows,
+// where stock vim reads ~/vimfiles instead.
+func vimDir(elems ...string) (string, error) {
+	root := ".vim"
+	if runtime.GOOS == "windows" {
+		root = "vimfiles"
+	}
+	return install.HomePath(append([]string{root}, elems...)...)
+}
+
+// nvimConfig is nvim's config root: $XDG_CONFIG_HOME/nvim when the
+// variable is set (nvim honors it on every OS), else %LOCALAPPDATA%\nvim
+// on Windows, else ~/.config/nvim.
+func nvimConfig(elems ...string) (string, error) {
+	if runtime.GOOS == "windows" && os.Getenv("XDG_CONFIG_HOME") == "" {
+		return localAppData(append([]string{"nvim"}, elems...)...)
+	}
+	return xdgConfig(append([]string{"nvim"}, elems...)...)
+}
 
 // Vim and Neovim share one plugin file — the VimL is a strict common
 // subset, and the has('nvim') switch inside it reports the right editor
@@ -19,9 +41,9 @@ var vimEditor = editor{
 	name:  "vim",
 	title: "Vim",
 	detect: func() bool {
-		return onPath("vim") || exists(install.HomePath(".vim"))
+		return onPath("vim") || exists(vimDir())
 	},
-	hookPath: func() (string, error) { return install.HomePath(".vim", "plugin", "jog.vim") },
+	hookPath: func() (string, error) { return vimDir("plugin", "jog.vim") },
 	asset:    vimAsset,
 	notes: func() []string {
 		return []string{
@@ -35,9 +57,9 @@ var nvimEditor = editor{
 	name:  "nvim",
 	title: "Neovim",
 	detect: func() bool {
-		return onPath("nvim") || exists(xdgConfig("nvim"))
+		return onPath("nvim") || exists(nvimConfig())
 	},
-	hookPath: func() (string, error) { return xdgConfig("nvim", "plugin", "jog.vim") },
+	hookPath: func() (string, error) { return nvimConfig("plugin", "jog.vim") },
 	asset:    vimAsset,
 	notes: func() []string {
 		return []string{
