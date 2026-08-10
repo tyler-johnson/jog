@@ -174,6 +174,59 @@ func TestHookSessionNotice(t *testing.T) {
 	}
 }
 
+// Codex requires every non-empty UserPromptSubmit stdout stream to be one
+// JSON document. In particular, its context injection is not Claude's raw
+// stdout contract even though both clients use the same event name.
+func TestHookCodexSessionNoticeJSON(t *testing.T) {
+	tr := setup(t)
+	prompt := func(session, text string) string {
+		t.Helper()
+		tr.Write("b.txt", text+"\n")
+		return hookAs(t, "codex", payload(t, map[string]any{
+			"hook_event_name": "UserPromptSubmit",
+			"session_id":      session,
+			"cwd":             tr.Dir,
+			"prompt":          text,
+		}))
+	}
+
+	out := prompt("codex-s1", "first")
+	var notice struct {
+		HookSpecificOutput struct {
+			HookEventName     string `json:"hookEventName"`
+			AdditionalContext string `json:"additionalContext"`
+		} `json:"hookSpecificOutput"`
+	}
+	if err := json.Unmarshal([]byte(out), &notice); err != nil {
+		t.Fatalf("UserPromptSubmit stdout is not one JSON document: %v\n%s", err, out)
+	}
+	if got := notice.HookSpecificOutput.HookEventName; got != "UserPromptSubmit" {
+		t.Errorf("hookEventName = %q, want UserPromptSubmit", got)
+	}
+	if got := notice.HookSpecificOutput.AdditionalContext; got != agentNotice {
+		t.Errorf("additionalContext = %q, want agent notice", got)
+	}
+	if got := subject(tr); got != `codex[codex-s1]: prompt "first"` {
+		t.Errorf("subject = %q", got)
+	}
+
+	if out := prompt("codex-s1", "again"); out != "" {
+		t.Errorf("same session again: want silence, got %q", out)
+	}
+
+	tr.Write("b.txt", "tool\n")
+	out = hookAs(t, "codex", payload(t, map[string]any{
+		"hook_event_name": "PreToolUse",
+		"session_id":      "codex-s2",
+		"cwd":             tr.Dir,
+		"tool_name":       "apply_patch",
+		"tool_input":      map[string]any{"command": "*** Begin Patch"},
+	}))
+	if out != "" {
+		t.Errorf("PreToolUse must stay silent, got %q", out)
+	}
+}
+
 // Cursor speaks its own dialect: conversation_id for the session,
 // workspace_roots for the repo, and permission events that get an
 // explicit allow — even when the snapshot path fails.

@@ -54,8 +54,10 @@ var hookAdapters = map[string]hookAdapter{
 	// Claude Code injects UserPromptSubmit stdout into context on exit 0
 	// (PreToolUse stdout is not injected, so those events stay silent).
 	"claude": {noticeEvent: "UserPromptSubmit", notice: textNotice},
-	// Codex: same contract as Claude.
-	"codex": {noticeEvent: "UserPromptSubmit", notice: textNotice},
+	// Codex parses non-empty hook stdout as JSON. UserPromptSubmit context
+	// belongs in hookSpecificOutput; plain text is rejected as invalid hook
+	// output even though the snapshot itself completed successfully.
+	"codex": {noticeEvent: "UserPromptSubmit", notice: codexNotice},
 	// Gemini parses hook stdout as JSON on exit 0, so the notice is
 	// wrapped as BeforeAgent additionalContext; anything else stays
 	// silent (empty stdout, never stray text).
@@ -80,9 +82,9 @@ var hookAdapters = map[string]hookAdapter{
 //
 // Iron rule: ALWAYS exit 0 (plan M4). A non-zero exit can block the
 // user's tool call or prompt (Claude and Gemini treat some codes as a
-// veto; Copilot's preToolUse blocks on any non-zero). jog failing must
-// never cost the user their action — diagnostics go to stderr only under
-// JOG_DEBUG=1.
+// veto; Codex can block prompts; Copilot's preToolUse blocks on any
+// non-zero). jog failing must never cost the user their action —
+// diagnostics go to stderr only under JOG_DEBUG=1.
 func Hook(clientName string, stdin io.Reader, stdout io.Writer) int {
 	ad, known := hookAdapters[clientName]
 	if !known {
@@ -157,13 +159,23 @@ func textNotice(w io.Writer) {
 	fmt.Fprintln(w, agentNotice)
 }
 
+// codexNotice follows Codex's UserPromptSubmit command-output schema.
+// Codex rejects a non-empty stdout stream that is not one JSON document.
+func codexNotice(w io.Writer) {
+	contextNotice(w, "UserPromptSubmit")
+}
+
 // geminiNotice wraps the notice in Gemini's hook-output JSON: on exit 0
 // stdout must be a single JSON document, and additionalContext is its
 // context-injection channel for BeforeAgent.
 func geminiNotice(w io.Writer) {
+	contextNotice(w, "BeforeAgent")
+}
+
+func contextNotice(w io.Writer, event string) {
 	b, err := json.Marshal(map[string]any{
 		"hookSpecificOutput": map[string]any{
-			"hookEventName":     "BeforeAgent",
+			"hookEventName":     event,
 			"additionalContext": agentNotice,
 		},
 	})

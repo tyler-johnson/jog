@@ -614,9 +614,9 @@ func TestHookAlwaysExitsZero(t *testing.T) {
 	tr.Commit("first")
 	tr.Write("b.txt", "y\n")
 
-	json := `{"hook_event_name":"PreToolUse","session_id":"e2e-sess-id","cwd":` +
+	claudeJSON := `{"hook_event_name":"PreToolUse","session_id":"e2e-sess-id","cwd":` +
 		strconvQuote(tr.Dir) + `,"tool_name":"Bash","tool_input":{"command":"make build"}}`
-	stdout, _, code := runJogStdin(t, tr.Dir, json, "hook", "claude")
+	stdout, _, code := runJogStdin(t, tr.Dir, claudeJSON, "hook", "claude")
 	if code != 0 || stdout != "" {
 		t.Errorf("hook claude: code=%d stdout=%q (stdout must stay empty)", code, stdout)
 	}
@@ -633,6 +633,30 @@ func TestHookAlwaysExitsZero(t *testing.T) {
 	}
 	if got := tr.Git("log", "-1", "--format=%s", "refs/jog/main"); got != "codex[codex-se]: apply_patch(*** Begin Patch)" {
 		t.Errorf("codex provenance = %q", got)
+	}
+
+	codexPromptJSON := `{"hook_event_name":"UserPromptSubmit","session_id":"codex-session","cwd":` +
+		strconvQuote(tr.Dir) + `,"prompt":"test the prompt hook"}`
+	stdout, _, code = runJogStdin(t, tr.Dir, codexPromptJSON, "hook", "codex")
+	if code != 0 {
+		t.Fatalf("hook codex UserPromptSubmit: code=%d stdout=%q", code, stdout)
+	}
+	var notice struct {
+		HookSpecificOutput struct {
+			HookEventName     string `json:"hookEventName"`
+			AdditionalContext string `json:"additionalContext"`
+		} `json:"hookSpecificOutput"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &notice); err != nil {
+		t.Fatalf("hook codex UserPromptSubmit emitted invalid JSON: %v\n%s", err, stdout)
+	}
+	if notice.HookSpecificOutput.HookEventName != "UserPromptSubmit" ||
+		!strings.Contains(notice.HookSpecificOutput.AdditionalContext, "[jog]") {
+		t.Errorf("hook codex UserPromptSubmit response = %q", stdout)
+	}
+	stdout, _, code = runJogStdin(t, tr.Dir, codexPromptJSON, "hook", "codex")
+	if code != 0 || stdout != "" {
+		t.Errorf("repeated codex prompt: code=%d stdout=%q, want silent success", code, stdout)
 	}
 
 	if _, _, code := runJogStdin(t, tr.Dir, "garbage", "hook", "claude"); code != 0 {
