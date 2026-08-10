@@ -5,9 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"strings"
-	"syscall"
 
 	"github.com/tyler-johnson/jog/internal/gitx"
 	"github.com/tyler-johnson/jog/internal/provenance"
@@ -66,8 +64,10 @@ func report(res *snap.Result) {
 }
 
 // Passthrough is every non-reserved invocation: snapshot causally before the
-// command, then exec the real git binary — real TTY, real exit codes, jog
-// reimplements nothing (DESIGN §5). On success this never returns.
+// command, then hand off to the real git binary — real TTY, real exit codes,
+// jog reimplements nothing (DESIGN §5). On unix the handoff replaces this
+// process and never returns on success; on windows it proxies git as a child
+// and mirrors its exit code (execGit is per-platform).
 func Passthrough(gitArgs []string) int {
 	// Best-effort snapshot: an engine failure must never block the user's
 	// command (plan D4) — warn and exec anyway.
@@ -84,20 +84,4 @@ func Passthrough(gitArgs []string) int {
 	}
 
 	return execGit(gitArgs)
-}
-
-// execGit replaces this process with real git — real TTY (pager, colors,
-// interactive rebase), real exit codes. Returns only on failure.
-func execGit(gitArgs []string) int {
-	gitPath, err := exec.LookPath("git")
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "jog: git not found on PATH")
-		return 127
-	}
-	// jog is installed as a shell alias, never a git-named binary on PATH
-	// (DESIGN §5), so LookPath cannot resolve back to jog itself.
-	argv := append([]string{"git"}, gitArgs...)
-	err = syscall.Exec(gitPath, argv, os.Environ())
-	fmt.Fprintf(os.Stderr, "jog: exec git: %v\n", err)
-	return 126
 }
