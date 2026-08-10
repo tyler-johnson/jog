@@ -37,18 +37,24 @@ restored to c0ffee1 (2 minutes ago — pre: git status): 14 restored, 0 deleted
 
 ## Why jog
 
-Pick the pitch that fits how you work:
+Git never loses a commit, but it holds no opinion about work you
+haven't committed yet. The working tree is a disposable scratchpad, and
+git's sharpest tools assume you mean it: `checkout -f` and
+`reset --hard` don't ask twice, and muscle memory is exactly how they
+get typed at the wrong moment. Now add a coding agent with its own
+ideas about which files are obsolete.
 
-- **A working-tree reflog.** Git has a safety net for refs; jog extends the
-  same idea to your uncommitted changes. Every snapshot records *what command
-  it ran ahead of* — the timeline is an operation log, not a smear of states.
-- **The missing half of Claude Code's `/rewind`.** Claude's checkpoints
-  restore Edit/Write changes but explicitly not bash-made changes, manual
-  edits, or untracked files — and they expire. jog covers exactly that
-  complement, at the same prompt/tool-call boundaries, with retention you
-  control: `/rewind` the conversation, `jog restore --all` the world.
-- **[jj]'s snapshot model wearing git's skin.** Snapshot at the start of
-  every command — but the commands are the git you already type.
+jog is a write-ahead log for your working tree. A beat before every git
+command, agent tool call, or editor save, it captures the whole tree,
+untracked files included, as ordinary git commits under
+`refs/jog/<branch>`. Each snapshot names the command it ran ahead of,
+so the timeline reads as an operation log, not a smear of autosaves:
+"the tree as it stood when claude ran `go test`". jog doesn't try to
+prevent mistakes — it makes them reversible.
+
+The model is borrowed with admiration from [jj], which snapshots before
+every command; jog just makes the commands the git you already type, in
+the repos you already have.
 
 [jj]: https://github.com/jj-vcs/jj
 
