@@ -92,7 +92,7 @@ func cursorHooksInstall(project bool) (string, bool, error) {
 func cursorEntriesInvokeJog(entries []any, cmd string) bool {
 	for _, e := range entries {
 		em, _ := e.(map[string]any)
-		if c, _ := em["command"].(string); c == cmd || strings.Contains(c, "jog hook cursor") {
+		if c, _ := em["command"].(string); c == cmd || invokesJog(c, "cursor") {
 			return true
 		}
 	}
@@ -122,7 +122,7 @@ func cursorHooksUninstall(project bool) (string, bool, error) {
 			removedHere := 0
 			for _, e := range entries {
 				em, _ := e.(map[string]any)
-				if c, _ := em["command"].(string); em != nil && strings.Contains(c, "jog hook cursor") {
+				if c, _ := em["command"].(string); em != nil && invokesJog(c, "cursor") {
 					removed++
 					removedHere++
 					continue
@@ -178,7 +178,7 @@ func cursorFileWired(path string) bool {
 	}
 	for _, entries := range s.Hooks {
 		for _, e := range entries {
-			if strings.Contains(e.Command, "jog hook cursor") {
+			if invokesJog(e.Command, "cursor") {
 				return true
 			}
 		}

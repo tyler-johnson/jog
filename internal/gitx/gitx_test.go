@@ -68,7 +68,8 @@ func TestDiscoverLinkedWorktree(t *testing.T) {
 	}
 	// Linked worktrees get a per-worktree git dir — this is what keeps the
 	// shadow index (and refs/worktree/* if ever needed) from being shared.
-	if !strings.Contains(r.GitDir, string(filepath.Separator)+"worktrees"+string(filepath.Separator)) {
+	// git prints forward-slash paths on every OS — compare in that form.
+	if !strings.Contains(filepath.ToSlash(r.GitDir), "/worktrees/") {
 		t.Errorf("linked worktree GitDir = %q, want a .git/worktrees/<name> path", r.GitDir)
 	}
 	if r.GitDir == tr.GitDir {

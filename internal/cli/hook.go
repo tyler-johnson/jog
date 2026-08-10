@@ -234,15 +234,33 @@ func hookDetail(p *hookPayload, cwd string) string {
 }
 
 // relPath shortens absolute tool paths against the payload cwd for readable
-// timelines; anything outside cwd stays absolute.
+// timelines; anything outside cwd stays absolute. Subjects always read
+// with forward slashes, whatever the OS.
 func relPath(base, path string) string {
 	if base == "" || !filepath.IsAbs(path) {
 		return path
 	}
-	if rel, err := filepath.Rel(base, path); err == nil && !strings.HasPrefix(rel, "..") {
+	if rel, ok := relTo(base, path); ok {
 		return rel
 	}
+	// The two sides may spell the same directory differently — windows 8.3
+	// short names (RUNNER~1), macOS's /var → /private/var symlink. Resolve
+	// both and retry before giving up.
+	rbase, err1 := filepath.EvalSymlinks(base)
+	rpath, err2 := filepath.EvalSymlinks(path)
+	if err1 == nil && err2 == nil {
+		if rel, ok := relTo(rbase, rpath); ok {
+			return rel
+		}
+	}
 	return path
+}
+
+func relTo(base, path string) (string, bool) {
+	if rel, err := filepath.Rel(base, path); err == nil && !strings.HasPrefix(rel, "..") {
+		return filepath.ToSlash(rel), true
+	}
+	return "", false
 }
 
 func hookDone(stage string, err error) int {

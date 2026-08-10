@@ -52,6 +52,16 @@ func TestMain(m *testing.M) {
 	os.Exit(m.Run())
 }
 
+// hookNeedle is the invariant tail of a wired jog hook command: the
+// binary is bare `jog` on PATH or an absolute path ending jog / jog.exe,
+// so the tail is what every spelling shares.
+func hookNeedle(client string) string {
+	if runtime.GOOS == "windows" {
+		return "jog.exe hook " + client
+	}
+	return "jog hook " + client
+}
+
 // vimPluginPath mirrors the per-OS vim runtime root the editors package
 // uses: ~/.vim everywhere except Windows's ~/vimfiles.
 func vimPluginPath(home string) string {
@@ -1483,7 +1493,7 @@ func TestAgentsCodex(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(b), "jog hook codex") || !strings.Contains(string(b), "Bash|Edit|Write") {
+	if !strings.Contains(string(b), hookNeedle("codex")) || !strings.Contains(string(b), "Bash|Edit|Write") {
 		t.Errorf("unexpected Codex hooks:\n%s", b)
 	}
 	if sb, err := os.ReadFile(skillPath); err != nil {
@@ -1588,11 +1598,13 @@ func TestAgentsMoreClients(t *testing.T) {
 		want []string
 	}{
 		{filepath.Join(home, ".copilot", "settings.json"),
-			[]string{"PreToolUse", "UserPromptSubmit", "Bash|Edit|Write", "jog hook copilot"}},
+			[]string{"PreToolUse", "UserPromptSubmit", "Bash|Edit|Write", hookNeedle("copilot")}},
 		{cursorHooks,
-			[]string{"beforeShellExecution", "afterFileEdit", "beforeSubmitPrompt", "jog hook cursor", "echo audit"}},
+			[]string{"beforeShellExecution", "afterFileEdit", "beforeSubmitPrompt", hookNeedle("cursor"), "echo audit"}},
 		{filepath.Join(home, ".gemini", "settings.json"),
-			[]string{"BeforeAgent", "BeforeTool", "write_file|replace|run_shell_command", `"name": "jog"`, "jog hook gemini"}},
+			[]string{"BeforeAgent", "BeforeTool", "write_file|replace|run_shell_command", `"name": "jog"`, hookNeedle("gemini")}},
+		// The opencode plugin is a static asset invoking bare `jog` from
+		// PATH — its needle is literal on every OS.
 		{filepath.Join(home, ".config", "opencode", "plugins", "jog.js"),
 			[]string{"jog hook opencode", "tool.execute.before", "chat.message"}},
 	}
@@ -2062,7 +2074,7 @@ func TestEditorsVSCode(t *testing.T) {
 	// A foreign-machine rendering (VS Code's install-on-remote copies the
 	// other machine's baked path) is still jog's to overwrite and remove.
 	if err := os.WriteFile(filepath.Join(server, "extension.js"),
-		bytes.Replace(mustRead(t, filepath.Join(desktop, "extension.js")), []byte(`"`+jogBin+`"`), []byte(`"/opt/homebrew/bin/jog"`), 1), 0o644); err != nil {
+		bytes.Replace(mustRead(t, filepath.Join(desktop, "extension.js")), []byte(`"`+filepath.ToSlash(jogBin)+`"`), []byte(`"/opt/homebrew/bin/jog"`), 1), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	stdout, _, code = runJogEnv(t, dir, env, "editors", "install", "vscode")

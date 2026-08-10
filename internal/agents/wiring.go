@@ -6,6 +6,7 @@ import (
 	"maps"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 )
 
@@ -22,15 +23,25 @@ type hookEvent struct{ name, matcher string }
 
 // hookCommand picks how the hook invokes jog: the bare name when jog is on
 // PATH (survives upgrades and relocations), otherwise this binary's
-// absolute path as a fallback that at least works today.
+// absolute path as a fallback that at least works today. Forward slashes
+// always — a backslash path inside a JSON command string reads as escape
+// noise, and Windows runs slashed paths fine.
 func hookCommand(client string) string {
 	if _, err := exec.LookPath("jog"); err == nil {
 		return "jog hook " + client
 	}
 	if exe, err := os.Executable(); err == nil {
-		return exe + " hook " + client
+		return filepath.ToSlash(exe) + " hook " + client
 	}
 	return "jog hook " + client
+}
+
+// invokesJog reports whether a hook command string invokes jog's adapter
+// for client — the bare `jog hook <client>`, an absolute path ending in
+// jog or jog.exe, or any user-authored spelling carrying the same tail.
+func invokesJog(command, client string) bool {
+	return strings.Contains(command, "jog hook "+client) ||
+		strings.Contains(command, "jog.exe hook "+client)
 }
 
 // wireHooks adds the jog hook entries that are missing and reports which
@@ -81,7 +92,7 @@ func eventInvokesJog(v any, cmd, client string) bool {
 		entries, _ := gm["hooks"].([]any)
 		for _, e := range entries {
 			em, _ := e.(map[string]any)
-			if c, _ := em["command"].(string); c == cmd || strings.Contains(c, "jog hook "+client) {
+			if c, _ := em["command"].(string); c == cmd || invokesJog(c, client) {
 				return true
 			}
 		}
@@ -116,7 +127,7 @@ func unwireHooks(m map[string]any, client string) int {
 			removedHere := 0
 			for _, e := range entries {
 				em, _ := e.(map[string]any)
-				if c, _ := em["command"].(string); em != nil && strings.Contains(c, "jog hook "+client) {
+				if c, _ := em["command"].(string); em != nil && invokesJog(c, client) {
 					removed++
 					removedHere++
 					continue
@@ -166,7 +177,7 @@ func hooksFileWired(path, client string) bool {
 	for _, matchers := range s.Hooks {
 		for _, matcher := range matchers {
 			for _, hook := range matcher.Hooks {
-				if strings.Contains(hook.Command, "jog hook "+client) {
+				if invokesJog(hook.Command, client) {
 					return true
 				}
 			}
