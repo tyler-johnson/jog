@@ -13,12 +13,14 @@ package main
 import (
 	"fmt"
 	"os"
+	"runtime"
 	"runtime/debug"
 	"strings"
 
 	"github.com/tyler-johnson/jog/internal/agents"
 	"github.com/tyler-johnson/jog/internal/cli"
 	"github.com/tyler-johnson/jog/internal/editors"
+	"github.com/tyler-johnson/jog/internal/selfupdate"
 )
 
 const usage = `jog — a memory for your working tree
@@ -38,15 +40,23 @@ usage:
   jog trim [--dry-run]         drop snapshots older than the keep setting (default 90 days)
   jog config [key [value]]     list jog's settings — or get, set (--unset, --global)
   jog doctor [--fix]           verify invariants, wiring, and liveness
+  jog update                   update jog to the latest release
   jog version                  print jog's version
 
 reserved for future releases: mcp
 
 "jog help <command>" (or jog <command> --help) has the details.
-
-Install the alias so every git command snapshots first:
-  alias git='jog git'
 `
+
+// usageText appends the per-shell alias hint: the point is a line the
+// reader can paste, so each OS sees its own shell's spelling.
+func usageText() string {
+	alias := "  alias git='jog git'"
+	if runtime.GOOS == "windows" {
+		alias = "  function git { jog git @args }   # in your PowerShell profile"
+	}
+	return usage + "\nInstall the alias so every git command snapshots first:\n" + alias + "\n"
+}
 
 const agentsHelp = `jog agents — agent client integrations
 
@@ -259,15 +269,37 @@ directory does not matter; outside a git repo it is a fast no-op. These
 are the commands ` + "`jog editors install`" + ` wires; they are not
 meant to be run by hand.
 `,
+	"update": `jog update — update jog to the latest release
+
+usage:
+  jog update
+
+Checks GitHub for the newest jog release, downloads this platform's
+binary, verifies its sha256 against the release's checksums.txt, and
+replaces the running executable in place. Prints "already up to date"
+when there is nothing newer. Nothing else changes — settings, hooks,
+and snapshots are untouched by an update.
+
+Installs that belong to another tool are recognized and left alone:
+a jog built from source is updated with
+go install github.com/tyler-johnson/jog/cmd/jog@latest, and a
+Homebrew install with brew upgrade jog — jog update says which. If the
+install directory isn't writable, re-run with the needed permissions
+(e.g. sudo).
+
+Set GITHUB_TOKEN to authenticate the release lookup if the anonymous
+GitHub API rate limit ever bites.
+`,
 	"git": `jog git — snapshot, then run the real git command
 
 usage:
   jog git <args…>
 
 Pure passthrough: take a snapshot, then hand every argument to real git
-exactly as typed. This is what alias git='jog git' expands to. jog never
-matches or reinterprets git verbs, so no git command, alias, or future
-git feature can ever collide with it.
+exactly as typed. This is what alias git='jog git' expands to (PowerShell:
+function git { jog git @args } in your profile). jog never matches or
+reinterprets git verbs, so no git command, alias, or future git feature
+can ever collide with it.
 
 Note: jog git --help reaches real git, as any git argument must. This
 text lives at jog help git.
@@ -371,8 +403,10 @@ func run(args []string) int {
 		if len(args) >= 2 {
 			return printHelp(args[1])
 		}
-		fmt.Print(usage)
+		fmt.Print(usageText())
 		return 0
+	case "update":
+		return selfupdate.Run(args[1:], moduleVersion())
 	case "-v", "--version", "version":
 		fmt.Println(versionString())
 		return 0
@@ -381,6 +415,18 @@ func run(args []string) int {
 			args[0], strings.Join(args, " "))
 		return 1
 	}
+}
+
+// moduleVersion is the version Go embedded at build time: "vX.Y.Z" for
+// tagged builds, "(devel)" or a pseudo-version otherwise, "" when the
+// build carries no info at all. jog update uses it to tell release
+// installs from source builds.
+func moduleVersion() string {
+	info, ok := debug.ReadBuildInfo()
+	if !ok {
+		return ""
+	}
+	return info.Main.Version
 }
 
 // versionString reads the version Go embeds at build time: the module
