@@ -32,15 +32,17 @@ func TestStateRoundTrip(t *testing.T) {
 		t.Errorf("empty cache should load the zero state, got %+v", s)
 	}
 	want := checkState{
-		CheckedAt: time.Date(2026, 8, 1, 3, 0, 0, 0, time.UTC),
-		Latest:    "v1.5.0",
-		Notified:  "v1.4.0",
+		CheckedAt:   time.Date(2026, 8, 1, 3, 0, 0, 0, time.UTC),
+		Latest:      "v1.5.0",
+		Notified:    "v1.4.0",
+		AutoTriedAt: time.Date(2026, 8, 2, 9, 0, 0, 0, time.UTC),
 	}
 	if err := saveState(want); err != nil {
 		t.Fatal(err)
 	}
 	got := loadState()
-	if !got.CheckedAt.Equal(want.CheckedAt) || got.Latest != want.Latest || got.Notified != want.Notified {
+	if !got.CheckedAt.Equal(want.CheckedAt) || got.Latest != want.Latest ||
+		got.Notified != want.Notified || !got.AutoTriedAt.Equal(want.AutoTriedAt) {
 		t.Errorf("round trip: got %+v want %+v", got, want)
 	}
 
@@ -112,6 +114,33 @@ func TestPendingNotice(t *testing.T) {
 	} {
 		if got := pendingNotice(tt.s, tt.version, tt.exe, tt.tty, tt.enabled); got != tt.want {
 			t.Errorf("%s: got %q, want %q", tt.name, got, tt.want)
+		}
+	}
+}
+
+func TestAutoUpdateDue(t *testing.T) {
+	now := time.Date(2026, 8, 9, 12, 0, 0, 0, time.UTC)
+	newer := checkState{Latest: "v1.5.0"}
+	for _, tt := range []struct {
+		name    string
+		s       checkState
+		version string
+		exe     string
+		want    bool
+	}{
+		{"newer, never tried", newer, "v1.4.0", "/usr/local/bin/jog", true},
+		{"equal", checkState{Latest: "v1.4.0"}, "v1.4.0", "/usr/local/bin/jog", false},
+		{"older cache", checkState{Latest: "v1.3.0"}, "v1.4.0", "/usr/local/bin/jog", false},
+		{"tried an hour ago", checkState{Latest: "v1.5.0", AutoTriedAt: now.Add(-time.Hour)}, "v1.4.0", "/usr/local/bin/jog", false},
+		{"tried two days ago", checkState{Latest: "v1.5.0", AutoTriedAt: now.Add(-48 * time.Hour)}, "v1.4.0", "/usr/local/bin/jog", true},
+		{"notified is irrelevant", checkState{Latest: "v1.5.0", Notified: "v1.5.0"}, "v1.4.0", "/usr/local/bin/jog", true},
+		{"brew install", newer, "v1.4.0", "/opt/homebrew/Cellar/jog/1.4.0/bin/jog", false},
+		{"source build", newer, "(devel)", "/usr/local/bin/jog", false},
+		{"empty cache", checkState{}, "v1.4.0", "/usr/local/bin/jog", false},
+		{"garbage latest", checkState{Latest: "nonsense"}, "v1.4.0", "/usr/local/bin/jog", false},
+	} {
+		if got := autoUpdateDue(tt.s, tt.version, tt.exe, now); got != tt.want {
+			t.Errorf("%s: autoUpdateDue = %v, want %v", tt.name, got, tt.want)
 		}
 	}
 }

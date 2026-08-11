@@ -55,7 +55,15 @@ var configOptions = []configOption{
 		key: "jog.updateCheck", def: "true", kind: "bool",
 		desc: "Whether jog looks for new releases: a background check at most\n" +
 			"weekly, and a one-line notice after a git command, at most once per\n" +
-			"release. false turns the checks and the notices off entirely.",
+			"release. false turns the checks and the notices off entirely —\n" +
+			"including autoUpdate.",
+	},
+	{
+		key: "jog.autoUpdate", def: "false", kind: "bool",
+		desc: "Install new releases automatically: instead of printing the notice,\n" +
+			"jog updates itself in the background — the running command finishes\n" +
+			"on the old version, the next one runs the new. Homebrew and source\n" +
+			"installs keep the notice (their package manager owns the binary).",
 	},
 }
 

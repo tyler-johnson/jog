@@ -285,7 +285,9 @@ jog also checks on its own: at most weekly, a background
 ` + "`jog update --check`" + ` refreshes a small cache in your user cache
 directory, and when it finds a newer release, one line prints after a
 git command — once per release, only on a terminal, never from hooks.
-` + "`jog config updateCheck false`" + ` turns the checks and notices off.
+` + "`jog config autoUpdate true`" + ` goes one further: no notice — jog
+installs the release in the background and your next command runs it.
+` + "`jog config updateCheck false`" + ` turns all of it off.
 --check only rewrites the cache; it never installs anything.
 
 Installs that belong to another tool are recognized and left alone:

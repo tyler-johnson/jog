@@ -5,8 +5,11 @@ package selfupdate
 // that a release exists rides the passthrough: a detached background
 // `jog update --check` refreshes a small cache file at most weekly, and
 // when the cache says a newer release exists, one line prints after the
-// user's git command, once per release, ever. The hot path never touches
-// the network — deciding whether anything is pending is one file read.
+// user's git command, once per release, ever. With jog.autoUpdate on,
+// the notice becomes an act: a detached `jog update` installs the
+// release instead, and the next invocation simply runs it. The hot path
+// never touches the network — deciding whether anything is pending is
+// one file read.
 
 import (
 	"encoding/json"
@@ -24,13 +27,21 @@ import (
 // silences the background refresh.
 const checkInterval = 7 * 24 * time.Hour
 
+// autoInterval throttles auto-update: while a release is pending, the
+// config probe (and any install it launches) runs at most daily, so a
+// failing download — or a user who saw the notice and moved on — costs
+// nothing in between.
+const autoInterval = 24 * time.Hour
+
 // checkState is the whole schema of the cache file. Notified records the
 // last release a notice was printed for, so each release announces
-// exactly once.
+// exactly once. AutoTriedAt records the last auto-update probe, whether
+// or not it installed anything.
 type checkState struct {
-	CheckedAt time.Time `json:"checked_at"`
-	Latest    string    `json:"latest,omitempty"`
-	Notified  string    `json:"notified,omitempty"`
+	CheckedAt   time.Time `json:"checked_at"`
+	Latest      string    `json:"latest,omitempty"`
+	Notified    string    `json:"notified,omitempty"`
+	AutoTriedAt time.Time `json:"auto_tried_at,omitzero"`
 }
 
 // statePath is <user cache dir>/jog/update.json — XDG_CACHE_HOME or
@@ -109,14 +120,26 @@ func gatesOpen(version string) bool {
 }
 
 // configEnabled is the expensive half — one git spawn — so callers only
-// reach it when the cache is stale or a notice is about to print; the
-// common case pays nothing. Unset defaults to on.
+// reach it when the cache is stale or an update is pending; the common
+// case pays nothing. Unset defaults to on.
 func configEnabled() bool {
 	out, err := exec.Command("git", "config", "--type=bool", "--get", "jog.updateCheck").Output()
 	if err != nil {
 		return true
 	}
 	return strings.TrimSpace(string(out)) != "false"
+}
+
+// configAutoUpdate reports whether jog.autoUpdate is on: install new
+// releases in the background instead of printing the notice. Unset
+// defaults to off. Like configEnabled, one git spawn, reached only
+// while an update is pending.
+func configAutoUpdate() bool {
+	out, err := exec.Command("git", "config", "--type=bool", "--get", "jog.autoUpdate").Output()
+	if err != nil {
+		return false
+	}
+	return strings.TrimSpace(string(out)) == "true"
 }
 
 // MaybeSpawnCheck starts a detached `jog update --check` when the cache
@@ -160,8 +183,11 @@ func (u *Updater) RefreshCache() {
 }
 
 // Pending returns the one-line update notice when one is due, "" when
-// nothing should print. Reading the cache is the only cost until a
-// notice is actually about to show; only then is the config consulted.
+// nothing should print. Reading the cache is the only cost until an
+// update is actually pending; only then is the config consulted. With
+// jog.autoUpdate on, a pending update starts a detached `jog update`
+// instead of printing anything: the command in flight finishes on the
+// running binary, the next one runs the new release.
 func Pending(version string) string {
 	if !gatesOpen(version) {
 		return ""
@@ -173,12 +199,69 @@ func Pending(version string) string {
 	if resolved, err := filepath.EvalSymlinks(exe); err == nil {
 		exe = resolved
 	}
+	s := loadState()
 	tty := term.IsTerminal(int(os.Stderr.Fd()))
-	notice := pendingNotice(loadState(), version, exe, tty, true)
-	if notice == "" || !configEnabled() {
+	notice := pendingNotice(s, version, exe, tty, true)
+	probe := autoUpdateDue(s, version, exe, time.Now())
+	if notice == "" && !probe {
+		return ""
+	}
+	if !configEnabled() {
+		return ""
+	}
+	if probe {
+		// Stamp the probe before anything else — whatever happens next,
+		// the pending release must not re-read the config on every
+		// command for the next day.
+		s.AutoTriedAt = time.Now()
+		saveState(s)
+		if configAutoUpdate() {
+			spawnUpdate(exe)
+			return ""
+		}
+		return notice
+	}
+	// No probe due but a notice is. An auto-capable install only gets
+	// here inside the probe throttle — an install attempt is at most a
+	// day old — so auto mode still owns the release and the notice stays
+	// suppressed. Brew installs never probe and keep their notice.
+	if isAutoCapable(exe) && configAutoUpdate() {
 		return ""
 	}
 	return notice
+}
+
+// isAutoCapable reports whether this install is jog's own to replace —
+// brew owns its binaries, and gatesOpen has already excluded source
+// builds by the time this is asked.
+func isAutoCapable(exe string) bool {
+	return !isBrewInstall(exe)
+}
+
+// autoUpdateDue is the pure decision core behind auto-update: a newer
+// release is cached, the install is jog's own to replace, and the daily
+// probe throttle has lapsed. Notified is irrelevant here — notices and
+// installs are separate ledgers.
+func autoUpdateDue(s checkState, version, exe string, now time.Time) bool {
+	if !releaseVersion.MatchString(version) || !releaseVersion.MatchString(s.Latest) {
+		return false
+	}
+	return isNewer(version, s.Latest) && isAutoCapable(exe) && now.Sub(s.AutoTriedAt) >= autoInterval
+}
+
+// spawnUpdate starts the detached `jog update` that is an auto-update
+// install. Like the checker, the child is never waited on and its
+// output goes nowhere: success shows up as the next command running the
+// new release, and failure is retried after autoInterval. The child
+// cannot recurse: `jog update` dispatches straight to Run and never
+// enters the notice machinery — and even if it did, the caller stamps
+// AutoTriedAt before spawning, so a child's probe finds the throttle
+// closed.
+func spawnUpdate(exe string) {
+	cmd := exec.Command(exe, "update")
+	if err := cmd.Start(); err == nil {
+		cmd.Process.Release()
+	}
 }
 
 // pendingNotice is the pure decision core behind Pending: given the
