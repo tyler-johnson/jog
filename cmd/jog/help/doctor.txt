@@ -1,0 +1,10 @@
+jog doctor — verify the net is under you
+
+usage:
+  jog doctor [--fix]
+
+Checks the engine (chains, snapshot identity, reflogs, gc config), the
+wiring (shell alias, agent hooks and skills), and liveness (age of
+the newest snapshot). Read-only by default; --fix repairs exactly the
+two gc config keys that keep git's gc off jog's history, and nothing
+else. Exits 0 when healthy, 1 with findings.

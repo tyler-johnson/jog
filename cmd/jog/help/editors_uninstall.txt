@@ -1,0 +1,7 @@
+jog editors uninstall — remove an editor's save hook
+
+usage:
+  jog editors uninstall <editor>
+
+Removes exactly what install wrote for one editor, and refuses to
+delete a file carrying your own edits — it stays put with a note.

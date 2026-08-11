@@ -1,0 +1,10 @@
+jog agents uninstall — remove agent wiring
+
+usage:
+  jog agents uninstall [hooks|skill] [<client>…] [--project]
+
+Removes exactly what install wrote — hook entries and skill files — for
+every wired client, or only the named surface or clients. Your own
+settings are preserved, and a skill file carrying local edits is left
+in place with a note. --project targets the current repo's wiring
+instead of the home directory's.

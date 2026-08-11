@@ -1,0 +1,11 @@
+jog editor-hook — editor save hook entry point
+
+usage:
+  jog editor-hook <editor> [file]    (the editor invokes this on save)
+
+Snapshots the repository containing the saved file, and always exits 0
+with no output — a failing hook must never disturb a save. The repo is
+discovered from the file's own directory, so the editor's working
+directory does not matter; outside a git repo it is a fast no-op. These
+are the commands `jog editors install` wires; they are not
+meant to be run by hand.

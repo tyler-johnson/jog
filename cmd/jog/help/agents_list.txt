@@ -1,0 +1,8 @@
+jog agents list — every supported client and what is installed
+
+usage:
+  jog agents list
+
+One row per supported client: whether it is detected on this machine,
+and whether its hooks and skill are installed and where. The names it
+prints are the ones install and uninstall accept.

@@ -1,0 +1,28 @@
+jog — a memory for your working tree
+
+usage:
+  jog                      snapshot now
+  jog -m "msg"             snapshot with a message
+  jog <command> [<args>]
+
+commands:
+  log        browse the timeline of snapshots on this branch
+  since      what changed since a snapshot
+  restore    restore files — or the whole tree — from a snapshot
+  git        snapshot, then run the real git command (what the alias runs)
+  install    guided setup: the shell alias, agent hooks, editor hooks
+  uninstall  remove jog's wiring
+  shell      the git alias in your shell's rc file
+  agents     hooks + skill for the agent clients on this machine
+  editors    post-save snapshot hooks for text editors
+  trim       drop snapshots older than the keep setting
+  config     jog's settings — list, get, set
+  doctor     verify invariants, wiring, and liveness
+  update     update jog to the latest release
+  version    print jog's version
+  help       help for jog or any command
+
+hook and editor-hook are runtime entry points wired by install — run by
+your agent and editor, not by hand. Reserved for a future release: mcp.
+
+"jog help <command>" (or jog <command> --help) has the details.

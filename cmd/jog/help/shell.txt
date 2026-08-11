@@ -1,0 +1,15 @@
+jog shell — the git alias in your shell
+
+usage:
+  jog shell <command> [<args>]
+
+commands:
+  install    add the alias to a shell's rc file
+  uninstall  remove jog's alias line
+  list       every supported shell and what is installed
+
+The alias — `alias git='jog git'` — is the interactive trigger:
+every git command you type snapshots first. Scripts, IDEs, and CI are
+untouched; they resolve git on PATH and get real git.
+
+"jog help shell <command>" (or jog shell <command> --help) has the details.

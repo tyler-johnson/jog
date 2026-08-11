@@ -1,0 +1,15 @@
+jog agents — agent client integrations
+
+usage:
+  jog agents <command> [<args>]
+
+commands:
+  install    wire hooks + skill into every client detected on this machine
+  uninstall  remove exactly what install wrote
+  list       every supported client and what is installed
+
+Two surfaces per client: hooks (snapshot before every prompt and tool
+call) and a skill (teaches the agent the recovery workflow — find
+versions, restore, checkpoint before risk).
+
+"jog help agents <command>" (or jog agents <command> --help) has the details.

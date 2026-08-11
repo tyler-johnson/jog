@@ -1,0 +1,9 @@
+jog shell uninstall — remove the git alias
+
+usage:
+  jog shell uninstall [<shell>…]
+
+Removes exactly the marked line install appended, nothing else. With no
+names it sweeps every rc file carrying jog's line; an alias you wrote
+by hand is never touched — a note says so, and removing it is yours to
+do.

@@ -4,8 +4,8 @@ package selfupdate
 // after setup — it runs behind the git alias and hooks — so updating
 // rides the passthrough: a detached background `jog update --check`
 // refreshes a small cache file on the jog.updateCheck cadence (daily by
-// default), and when the cache says a
-// newer release exists, a detached `jog update` installs it — the next
+// default), and when the cache says a newer release exists, a detached
+// `jog update` installs it — the next
 // invocation simply runs the new release. With jog.autoUpdate off, the
 // install becomes a notice: one line after the user's git command, once
 // per release, ever. The hot path never touches the network — deciding
@@ -23,6 +23,8 @@ import (
 	"time"
 
 	"golang.org/x/term"
+
+	"github.com/tyler-johnson/jog/internal/gitx"
 )
 
 // defaultCheckInterval is how long a completed check (successful or
@@ -153,7 +155,7 @@ func gatesOpen(version string) bool {
 // before git's expiry parser sees it: approxidate happily reads "false"
 // as a date.
 func configCheckInterval() (time.Duration, bool) {
-	raw, err := exec.Command("git", "config", "--get", "jog.updateCheck").Output()
+	raw, err := exec.Command(gitx.Bin(), "config", "--get", "jog.updateCheck").Output()
 	if err != nil {
 		return defaultCheckInterval, true
 	}
@@ -173,7 +175,7 @@ func configCheckInterval() (time.Duration, bool) {
 		}
 		return max(time.Duration(secs)*time.Second, minCheckInterval), true
 	}
-	out, err := exec.Command("git", "config", "--type=expiry-date", "--get", "jog.updateCheck").Output()
+	out, err := exec.Command(gitx.Bin(), "config", "--type=expiry-date", "--get", "jog.updateCheck").Output()
 	if err != nil {
 		return defaultCheckInterval, true
 	}
@@ -217,7 +219,7 @@ func SyncInterval() {
 // Like configEnabled, one git spawn, reached only while an update is
 // pending.
 func configAutoUpdate() bool {
-	out, err := exec.Command("git", "config", "--type=bool", "--get", "jog.autoUpdate").Output()
+	out, err := exec.Command(gitx.Bin(), "config", "--type=bool", "--get", "jog.autoUpdate").Output()
 	if err != nil {
 		return true
 	}

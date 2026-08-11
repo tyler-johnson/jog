@@ -43,34 +43,29 @@ invaluable when you do.**_
 Inspired largely by [jj], jog is a snapshotting tool for uncommitted changes in
 Git working trees. It's designed to run silently inside the workflow you already
 have, capturing changes as they happen. With this, any mistake against the
-working tree becomes instantly reversible.
+working tree becomes instantly recoverable.
 
 Git protects your commits, but it has never protected your working tree. Losing
 uncommitted work to a wrong command is never fun, and now coding agents have
-made it commonplace.
+made it commonplace. Jog aims to solve this.
 
 [jj]: https://github.com/jj-vcs/jj
 
 ### How it works
 
-- Snapshots are plain git blobs/trees/commits in your repo's own object
+- **Snapshots are plain git blobs/trees/commits** in your repo's own object
   database, on refs under `refs/jog/<branch>` — invisible to branches, the
   index, `git log`, teammates, and remotes. Unchanged files cost zero bytes.
   There is no jog database.
-- Snapshots are **command-triggered, causally before the command runs** — the
-  only ordering that protects against `reset --hard` and `checkout -f`.
-  (Editor save hooks are the one post-state exception: there the saved
-  state *is* the checkpoint.) No daemon, no filesystem watcher, no git
-  hooks to install or break.
-- Four triggers: the shell alias (every git command you type), agent hooks
-  (Claude Code, Codex, Copilot, Cursor, Gemini CLI, OpenCode — before
-  every prompt and mutating tool call), editor save hooks (vim, emacs,
-  VS Code, JetBrains, and more — every save becomes a checkpoint), and
-  `jog` itself (deliberate checkpoints). A no-op snapshot costs a few
-  tens of milliseconds.
-- jog never reimplements a git verb, and never touches your index, HEAD,
-  branches, or config. If jog vanished tomorrow, stock git reads every
-  snapshot ([see below](#no-lock-in)).
+- **No daemon, no filesystem watcher, no git hooks to install or break.**
+  jog aims for robust over perfect: you don't need high-fidelity changesets of
+  everything you type — you need a place to restore to when a mistake is
+  made.
+- **Designed to be totally invisible.** jog piggybacks the workflow you already
+  have, snapshotting as you work. Every git repo is covered automatically with
+  nothing to enable, and it maintains itself, so there is nothing to clean up.
+  If you use agents, you don't even need to remember jog exists — when a
+  mistake is made, the agent will.
 
 ## Install
 
@@ -111,7 +106,7 @@ exists and says which command applies.
 **2. Wire it up:**
 
 ```sh
-jog install   # guided — asks about the alias, agents, and editors, one question each
+jog install   # guided — asks about the alias, agents, and editors
 ```
 
 The alias is how you "remember" to snapshot: you don't. Muscle memory is
@@ -254,11 +249,17 @@ Two disjoint namespaces, one rule: **`jog git` is the only door to git.**
 | `jog update` | update jog to the latest release, sha256-verified (script/binary installs; brew and go installs are pointed at their own upgrade command) |
 | `jog version` | print jog's version |
 
-`--at` (and `since`'s target slot) accepts a snap id from `jog log` or a
-time: `--at 30m`, `--at 1h`, `--at 2d`, `--at 1w` — plus anything git's
-date syntax accepts (`--at yesterday`, `--at 2.hours.ago`). Asking for a
-time older than the oldest snapshot falls back to the oldest, with a
-warning.
+`--at` (and `since`'s target slot) accepts a snap id from `jog log`, a
+time, or a position on the timeline:
+
+- a time: `--at 30m`, `--at 1h`, `--at 2d`, `--at 1w` — plus anything
+  git's date syntax accepts (`--at yesterday`, `--at 2.hours.ago`)
+- a position: `--at '@{1}'` is one snapshot ago, `--at '@{2}'` two back —
+  [git's reflog syntax](https://git-scm.com/docs/gitrevisions), counted
+  on the snapshot timeline (keep the quotes; some shells expand braces)
+
+Asking for a time older than the oldest snapshot falls back to the
+oldest, with a warning.
 
 A reading rule for the timeline: provenance records **what jog was running
 ahead of**, never who made the changes. Manual edits swept up by an
@@ -365,7 +366,7 @@ git restore --source refs/jog/main --worktree -- path   # restore one file
 
 ## Why not jog
 
-Honesty section, in the ripgrep tradition. jog does **not** protect against:
+jog does **not** protect against:
 
 - **GUI discards.** VS Code's git panel, Fork, etc. call git via their own
   bindings — no trigger fires. (VS Code moves discarded files to the trash,
@@ -405,6 +406,13 @@ validated through git's own parsers:
 | `jog.autoUpdate` | `true` | install new releases in the background; the next command runs the new version (`false` prints a one-line notice once per release instead; brew and source installs always get the notice) |
 | `gc.refs/jog/*.reflogExpire` | `never` | set by jog on first snapshot; keeps gc off jog's reflogs |
 | `gc.refs/jog/*.reflogExpireUnreachable` | `never` | same |
+
+Two environment variables:
+
+- `JOG_GIT` — the git binary jog runs, as a name to find on `PATH` or a
+  path to the executable. Default: `git` from `PATH`.
+- `JOG_DEBUG=1` — hook diagnostics on stderr (hooks are otherwise
+  silent by design).
 
 ## How it compares
 

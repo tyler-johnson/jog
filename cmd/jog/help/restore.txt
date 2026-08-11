@@ -1,0 +1,19 @@
+jog restore — restore from a snapshot (worktree only)
+
+usage:
+  jog restore <path>… [--at T]
+  jog restore --all [--at T]
+
+Restores files as they were in a snapshot — by default the newest one.
+--at takes a snap id from jog log, a time (--at 30m, --at 1h, --at 2d,
+or any git date, like yesterday), or a position: --at '@{1}' is one
+snapshot ago, '@{2}' two back — git's reflog syntax, counted on the
+snapshot timeline (https://git-scm.com/docs/gitrevisions; keep the
+quotes, some shells expand braces). --all restores the whole tree,
+including deleting files created since the snapshot.
+
+Only the worktree is written: index, HEAD, branches, and staged changes
+stay exactly as they are. Every restore snapshots first, so any jog
+restore is undone by another jog restore.
+
+back is an alias of jog restore.

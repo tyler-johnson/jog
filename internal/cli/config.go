@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/tyler-johnson/jog/internal/gitx"
 	"github.com/tyler-johnson/jog/internal/selfupdate"
 )
 
@@ -244,6 +245,6 @@ func syncUpdateCheck(opt configOption) {
 // The combined output comes back trimmed; on error it carries git's
 // message.
 func gitConfig(args ...string) (string, error) {
-	out, err := exec.Command("git", append([]string{"config"}, args...)...).CombinedOutput()
+	out, err := exec.Command(gitx.Bin(), append([]string{"config"}, args...)...).CombinedOutput()
 	return strings.TrimSpace(string(out)), err
 }

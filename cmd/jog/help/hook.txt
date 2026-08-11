@@ -1,0 +1,11 @@
+jog hook <client> — agent hook entry points
+
+usage:
+  jog hook <client>    (the agent client invokes this; JSON payload on stdin)
+
+Snapshots before every prompt and tool call, and always exits 0 — a
+failing hook must never block the user's action. Where the client allows
+it, jog also introduces itself once per session, one line of context.
+These are the commands `jog agents install` wires into each
+client's settings; they are not meant to be run by hand. The client
+names are the ones `jog agents list` shows.

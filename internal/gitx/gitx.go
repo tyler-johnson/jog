@@ -24,6 +24,30 @@ import (
 // commands surface it.
 var ErrNotARepo = errors.New("not a git repository")
 
+// Bin is the git executable jog runs: $JOG_GIT when set (a name looked
+// up on PATH, or a path to the binary), plain "git" from PATH otherwise.
+// An env var rather than git config on purpose — jog's settings live in
+// git config, which takes a working git to read.
+func Bin() string {
+	if g := os.Getenv("JOG_GIT"); g != "" {
+		return g
+	}
+	return "git"
+}
+
+// Look resolves Bin to an executable path, with an error message that
+// says where the bad value came from.
+func Look() (string, error) {
+	p, err := exec.LookPath(Bin())
+	if err == nil {
+		return p, nil
+	}
+	if g := os.Getenv("JOG_GIT"); g != "" {
+		return "", fmt.Errorf("git not found at %q (set by $JOG_GIT)", g)
+	}
+	return "", errors.New("git not found on PATH")
+}
+
 // Repo is a discovered repository context. Commands run with the working
 // directory jog was invoked from (or, for hooks, the cwd from the payload).
 type Repo struct {
@@ -63,7 +87,7 @@ func Discover(dir string) (*Repo, error) {
 // Run executes git with args and returns trimmed stdout. Non-zero exits
 // return a *GitError carrying the exit code and stderr.
 func (r *Repo) Run(args ...string) (string, error) {
-	cmd := exec.Command("git", args...)
+	cmd := exec.Command(Bin(), args...)
 	cmd.Dir = r.WorkDir
 	cmd.Env = append(os.Environ(), r.extraEnv...)
 	var stdout, stderr bytes.Buffer
@@ -98,7 +122,7 @@ func (r *Repo) RunRead(args ...string) (string, error) {
 // would overflow argv.
 func (r *Repo) RunReadStdin(stdin string, args ...string) (string, error) {
 	args = append([]string{"--no-optional-locks"}, args...)
-	cmd := exec.Command("git", args...)
+	cmd := exec.Command(Bin(), args...)
 	cmd.Dir = r.WorkDir
 	cmd.Env = append(os.Environ(), r.extraEnv...)
 	cmd.Stdin = strings.NewReader(stdin)
@@ -125,7 +149,7 @@ func (r *Repo) RunReadStdin(stdin string, args ...string) (string, error) {
 // commands whose warnings matter even on success (e.g. the reflog time-query
 // falling back to the oldest entry, which git reports on stderr with exit 0).
 func (r *Repo) RunReadLoud(args ...string) (string, error) {
-	cmd := exec.Command("git", append([]string{"--no-optional-locks"}, args...)...)
+	cmd := exec.Command(Bin(), append([]string{"--no-optional-locks"}, args...)...)
 	cmd.Dir = r.WorkDir
 	cmd.Env = append(os.Environ(), r.extraEnv...)
 	var stdout bytes.Buffer
@@ -145,7 +169,7 @@ func (r *Repo) RunReadLoud(args ...string) (string, error) {
 // walks that terminate early (e.g. the snaps chain-boundary scan) — the
 // caller reads what it needs, then kills and waits on the returned cmd.
 func (r *Repo) StartRead(args ...string) (*exec.Cmd, io.ReadCloser, error) {
-	cmd := exec.Command("git", append([]string{"--no-optional-locks"}, args...)...)
+	cmd := exec.Command(Bin(), append([]string{"--no-optional-locks"}, args...)...)
 	cmd.Dir = r.WorkDir
 	cmd.Env = append(os.Environ(), r.extraEnv...)
 	out, err := cmd.StdoutPipe()

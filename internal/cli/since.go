@@ -36,7 +36,7 @@ func Since(args []string) int {
 		case a == "--at":
 			i++
 			if i >= len(args) {
-				fmt.Fprintln(os.Stderr, "jog: --at requires a value (snap id, or a time like 1h or 20.minutes.ago)")
+				fmt.Fprintln(os.Stderr, "jog: --at requires a value (snap id, a time like 1h, or '@{1}' for one snapshot ago)")
 				return 2
 			}
 			at = args[i]

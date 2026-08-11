@@ -1,0 +1,16 @@
+jog editors — editor save hooks
+
+usage:
+  jog editors <command> [<args>]
+
+commands:
+  install    wire a post-save snapshot hook into one editor
+  uninstall  remove exactly what install wrote
+  list       every supported editor and what is installed
+
+A post-save hook makes every save inside a git repo a restorable
+snapshot — "vim: save src/main.go" in the timeline. Unlike jog's other
+triggers this snapshots after the save: the saved state is the
+checkpoint (pre-save state is your editor's undo).
+
+"jog help editors <command>" (or jog editors <command> --help) has the details.

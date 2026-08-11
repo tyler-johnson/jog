@@ -1,0 +1,15 @@
+jog config — jog's settings, all of them
+
+usage:
+  jog config                      list every setting, its value, and what it does
+  jog config <key>                print the effective value
+  jog config <key> <value>        set it for this repo
+  jog config --unset <key>        back to the default
+  (--global with set/unset applies to every repo)
+
+Keys are short names like maxFileSize — case-insensitive, and the
+git-config spelling (jog.maxFileSize) is accepted too. Settings are
+stored as plain git config under jog.*, so git config reads and writes
+them identically; jog config just knows the full list, the defaults,
+and what each one means. Values are validated through git's own
+parsers before anything is written.

@@ -1,0 +1,16 @@
+jog editors install — wire one editor
+
+usage:
+  jog editors install <editor>
+
+Installs the post-save hook into one text editor — exactly one name per
+invocation, so each editor's caveats get read: the output says how that
+editor's integration works, where the hook file lives, and when it
+takes effect. Everything installs into your user configuration,
+covering every repo — except jetbrains, whose hook can only live in a
+project's .idea directory: re-run it in each project you want covered.
+
+The wired hook runs `jog editor-hook <editor>`, always exits 0, prints
+nothing, and is a fast no-op outside git repos.
+
+supported: vim, nvim, emacs, sublime, kakoune, micro, vscode, jetbrains

@@ -1,0 +1,15 @@
+jog uninstall — remove jog's wiring
+
+usage:
+  jog uninstall [--yes]
+
+Shows what is currently wired — the shell alias, agent hooks and
+skills, editor save hooks — and removes all of it after one
+confirmation (--yes skips the question). Only jog's own lines and files
+are touched: a hand-written alias, your settings, and anything carrying
+your edits are left alone, with a note.
+
+Snapshots are not deleted — they live in each repo at refs/jog/* and
+`jog trim` manages them. The jog binary itself is also left in
+place; the closing line names the right way to remove it for how it was
+installed.

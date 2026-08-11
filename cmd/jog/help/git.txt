@@ -1,0 +1,13 @@
+jog git — snapshot, then run the real git command
+
+usage:
+  jog git <args…>
+
+Pure passthrough: take a snapshot, then hand every argument to real git
+exactly as typed. This is what alias git='jog git' expands to (PowerShell:
+function git { jog git @args } in your profile). jog never matches or
+reinterprets git verbs, so no git command, alias, or future git feature
+can ever collide with it.
+
+Note: jog git --help reaches real git, as any git argument must. This
+text lives at jog help git.

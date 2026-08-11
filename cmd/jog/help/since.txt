@@ -1,0 +1,21 @@
+jog since — what changed since a snapshot
+
+usage:
+  jog since [T] [-p] [path…]
+  jog since --at T [-p] [-- path…]
+
+Diffs a snapshot against the working tree as it is right now (a fresh
+snapshot is taken first, so untracked files count). Without T the
+baseline is your last command boundary — "what did that change". T is a
+snap id from jog log, a time (30m, 1h, 2d, 1w — or anything git's date
+syntax accepts: yesterday, 2.hours.ago), or a position: '@{1}' is one
+snapshot ago, '@{3}' three back — git's reflog syntax, counted on the
+snapshot timeline (https://git-scm.com/docs/gitrevisions).
+
+options:
+  -p, --patch   full patches instead of the per-file summary
+  --at T        the baseline, spelled explicitly
+  --            everything after it is a path
+
+A first argument naming an existing file is treated as a path, not a
+time; use --at (or --) when a path could be mistaken for a target.

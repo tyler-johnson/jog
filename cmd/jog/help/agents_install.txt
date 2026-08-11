@@ -1,0 +1,15 @@
+jog agents install — wire agent clients
+
+usage:
+  jog agents install [hooks|skill] [<client>…] [--project]
+
+Installs both surfaces — hooks and skill — for every agent client
+detected on this machine, and skips the rest. Name a surface to wire
+just that one, or one or more clients (the names `jog agents list`
+shows) to wire them whether detected or not.
+
+The default scope is the home directory, so the wiring covers every
+repo; --project scopes it to the current repo instead. Install is
+additive and idempotent: existing JSON fields are preserved, malformed
+JSON is never rewritten, and re-running is always safe. The output
+prints every path it touched.

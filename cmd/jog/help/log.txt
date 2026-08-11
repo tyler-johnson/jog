@@ -1,0 +1,36 @@
+jog log — browse the timeline of snapshots on this branch
+
+usage:
+  jog log [-p] [-n <count>] [--all] [--json] [--format=<fmt>] [path…]
+
+Snapshots first (running jog is itself a command boundary), then opens
+the timeline in an interactive browser: every snapshot with its id, age,
+and provenance, the diff previewed as you move. Two frames, one focused
+at a time: ↑/↓ (or j/k) move the list, enter focuses the diff so ↑/↓
+scroll it, esc returns to the list. From either frame, r restores the
+tree to the selected snapshot after a y/n confirmation, and q leaves
+everything untouched. Restores go through jog restore, so they are
+snapshotted first and undoable. On short windows (a phone SSH session)
+the frames show one at a time with the same keys.
+
+Provenance names the command a snapshot ran ahead of — "pre: git status",
+"claude[…]: Bash(…)", "manual: msg" — never who made the changes.
+
+options:
+  -p, --patch     print full patches via git log instead of browsing
+  -n <count>      only the newest <count> snapshots
+  --all           every branch's chain, interleaved, with a chain column
+  --json          the timeline as JSON: id, sha, ISO time, age, chain,
+                  provenance, and each snapshot's files with statuses —
+                  the same bytes on a terminal, piped, or in a script
+  --format=<fmt>  a git log format for the plain printout; nothing extra
+                  is appended, so --format=%h is one line per snapshot
+  path…           only snapshots that touched these paths (a restore then
+                  touches only those paths)
+
+Piped output (and -p) prints the plain git log rendering: id, age,
+provenance, files changed. --json and --format never open the browser,
+so scripts and agents get everything without touching git's refs
+themselves. Ids feed jog restore --at <id> and jog since <id>.
+
+snaps and pick are aliases of jog log.

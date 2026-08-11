@@ -1,0 +1,8 @@
+jog editors list — every supported editor and what is installed
+
+usage:
+  jog editors list
+
+One row per supported editor: whether it is detected on this machine
+and whether its save hook is installed and where. The names it prints
+are the ones install and uninstall accept.

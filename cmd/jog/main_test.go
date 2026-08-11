@@ -1325,6 +1325,17 @@ func TestVerbAliases(t *testing.T) {
 	}
 }
 
+// mustHelp runs `jog help <words…>` and returns stdout, failing the test
+// on a non-zero exit.
+func mustHelp(t *testing.T, dir string, words ...string) string {
+	t.Helper()
+	stdout, _, code := runJog(t, dir, append([]string{"help"}, words...)...)
+	if code != 0 {
+		t.Fatalf("help %v: code=%d", words, code)
+	}
+	return stdout
+}
+
 // TestPerCommandHelp: every jog verb answers --help and `jog help <verb>`
 // with a usage block — except git, where every argument (including
 // --help) belongs to real git. (TestHelp covers the global forms.)
@@ -1344,6 +1355,32 @@ func TestPerCommandHelp(t *testing.T) {
 		if code != 0 || byName != stdout {
 			t.Errorf("help %s differs from %s --help (code=%d)", v, v, code)
 		}
+	}
+
+	// Command groups have per-subcommand pages, reachable as
+	// `jog help <group> <sub>` and `jog <group> <sub> --help` alike.
+	for _, group := range []string{"agents", "editors", "shell"} {
+		for _, sub := range []string{"install", "uninstall", "list"} {
+			stdout, _, code := runJog(t, dir, group, sub, "--help")
+			if code != 0 || !strings.Contains(stdout, "usage:") || !strings.Contains(stdout, "jog "+group+" "+sub) {
+				t.Errorf("%s %s --help: code=%d\n%s", group, sub, code, stdout)
+			}
+			byName, _, code := runJog(t, dir, "help", group, sub)
+			if code != 0 || byName != stdout {
+				t.Errorf("help %s %s differs from --help (code=%d)", group, sub, code)
+			}
+			if stdout == mustHelp(t, dir, group) {
+				t.Errorf("%s %s shows the group page, not its own", group, sub)
+			}
+		}
+	}
+	// Group aliases resolve nested pages too.
+	if a, b := mustHelp(t, dir, "agent", "list"), mustHelp(t, dir, "agents", "list"); a != b {
+		t.Error("agent list help differs from agents list")
+	}
+	// An unknown subcommand falls back to the group page.
+	if a, b := mustHelp(t, dir, "agents", "bogus"), mustHelp(t, dir, "agents"); a != b {
+		t.Error("agents bogus should fall back to the agents page")
 	}
 
 	// The flag wins even mixed into other arguments.
@@ -1548,9 +1585,10 @@ func TestAgents(t *testing.T) {
 		t.Errorf("singular alias: code=%d\n%s", code, stdout)
 	}
 
-	_, stderr, code = runJogEnv(t, dir, env, "agents")
-	if code != 2 || !strings.Contains(stderr, "usage") {
-		t.Errorf("bare agents: code=%d stderr=%q", code, stderr)
+	// A bare command group prints its help — the command list — not an error.
+	stdout, _, code = runJogEnv(t, dir, env, "agents")
+	if code != 0 || !strings.Contains(stdout, "commands:") || !strings.Contains(stdout, "install") {
+		t.Errorf("bare agents: code=%d\n%s", code, stdout)
 	}
 }
 
@@ -1961,10 +1999,10 @@ func TestEditors(t *testing.T) {
 		t.Errorf("list after uninstall:\n%s", stdout)
 	}
 
-	// Bare `jog editors` is a usage error.
-	_, stderr, code = runJogEnv(t, dir, env, "editors")
-	if code != 2 || !strings.Contains(stderr, "usage") {
-		t.Errorf("bare editors: code=%d stderr=%s", code, stderr)
+	// A bare command group prints its help — the command list — not an error.
+	stdout, _, code = runJogEnv(t, dir, env, "editors")
+	if code != 0 || !strings.Contains(stdout, "commands:") || !strings.Contains(stdout, "install") {
+		t.Errorf("bare editors: code=%d\n%s", code, stdout)
 	}
 }
 
@@ -2289,9 +2327,10 @@ func TestShell(t *testing.T) {
 		t.Errorf("hand-written rc modified: %q", b)
 	}
 
-	// Usage errors: bare, unknown shell, unreadable $SHELL.
-	if _, stderr, code := runJogEnv(t, home, env, "shell"); code != 2 || !strings.Contains(stderr, "usage") {
-		t.Errorf("bare shell: code=%d %q", code, stderr)
+	// A bare command group prints its help; unknown shells and an
+	// unreadable $SHELL are usage errors.
+	if stdout, _, code := runJogEnv(t, home, env, "shell"); code != 0 || !strings.Contains(stdout, "commands:") {
+		t.Errorf("bare shell: code=%d %q", code, stdout)
 	}
 	if _, stderr, code := runJogEnv(t, home, env, "shell", "install", "tcsh"); code != 2 || !strings.Contains(stderr, "unknown shell") {
 		t.Errorf("unknown shell: code=%d %q", code, stderr)
@@ -2436,5 +2475,56 @@ func TestUninstallCommand(t *testing.T) {
 	stdout, _, code = runJogEnvStdin(t, home, env, "", "uninstall", "--yes")
 	if code != 0 || !strings.Contains(stdout, "nothing is wired") {
 		t.Errorf("empty uninstall: code=%d\n%s", code, stdout)
+	}
+}
+
+// TestJogGitEnv covers $JOG_GIT: it names the git binary jog runs, and
+// a bad value fails loudly with the variable named.
+func TestJogGitEnv(t *testing.T) {
+	dir := t.TempDir()
+
+	realGit, err := exec.LookPath("git")
+	if err != nil {
+		t.Fatal(err)
+	}
+	stdout, _, code := runJogEnv(t, dir, []string{"JOG_GIT=" + realGit}, "git", "version")
+	if code != 0 || !strings.Contains(stdout, "git version") {
+		t.Errorf("explicit path: code=%d\n%s", code, stdout)
+	}
+
+	_, stderr, code := runJogEnv(t, dir, []string{"JOG_GIT=" + filepath.Join(dir, "no-such-git")}, "git", "version")
+	if code != 127 || !strings.Contains(stderr, "JOG_GIT") {
+		t.Errorf("bad path: code=%d, want 127 naming JOG_GIT\n%s", code, stderr)
+	}
+}
+
+// TestHelpIndexCoverage pins the help pages to their indexes: every
+// command the root page lists has an embedded page (version and help are
+// answered by the binary itself), and every group-index row has a nested
+// page. A new command added to an index without a page fails here.
+func TestHelpIndexCoverage(t *testing.T) {
+	exempt := map[string]bool{"version": true, "help": true}
+	for _, group := range []string{"jog", "agents", "editors", "shell"} {
+		page, ok := helpTexts[group]
+		if !ok {
+			t.Fatalf("no page for %q", group)
+		}
+		_, rest, found := strings.Cut(page, "commands:\n")
+		if !found {
+			t.Fatalf("%s page has no commands index", group)
+		}
+		for _, line := range strings.Split(rest, "\n") {
+			if strings.TrimSpace(line) == "" {
+				break
+			}
+			name := strings.Fields(line)[0]
+			key := name
+			if group != "jog" {
+				key = group + " " + name
+			}
+			if _, ok := helpTexts[key]; !ok && !exempt[name] {
+				t.Errorf("%s index lists %q but there is no help/%s.txt", group, name, strings.ReplaceAll(key, " ", "_"))
+			}
+		}
 	}
 }

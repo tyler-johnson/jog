@@ -1,0 +1,17 @@
+jog install — guided setup
+
+usage:
+  jog install [--yes]
+
+Walks through jog's three wiring surfaces, one question each: the git
+alias for your shell (`jog shell install`), hooks + skill for
+the agent clients on this machine (`jog agents install`), and
+a post-save hook per detected editor (`jog editors install`).
+Each yes runs the same installer the standalone command runs — nothing
+here is reachable only through the wizard, and everything is additive
+and idempotent: re-running is always safe.
+
+--yes takes every default without asking (login-shell alias, detected
+agents, detected editors) — for scripts and dotfiles.
+
+`jog uninstall` reverses all of it; `jog doctor` verifies the wiring.

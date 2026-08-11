@@ -6,6 +6,8 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+
+	"github.com/tyler-johnson/jog/internal/gitx"
 )
 
 // runGitChild proxies git as a child with jog's own stdio handles — a
@@ -16,9 +18,9 @@ import (
 // handles the interrupt and jog lives to report git's exit code instead
 // of dying first and orphaning it.
 func runGitChild(gitArgs []string) int {
-	gitPath, err := exec.LookPath("git")
+	gitPath, err := gitx.Look()
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "jog: git not found on PATH")
+		fmt.Fprintln(os.Stderr, "jog: "+err.Error())
 		return 127
 	}
 	cmd := exec.Command(gitPath, gitArgs...)

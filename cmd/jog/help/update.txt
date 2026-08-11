@@ -1,0 +1,30 @@
+jog update — update jog to the latest release
+
+usage:
+  jog update           install the latest release
+  jog update --check   refresh the update cache only, silently
+
+Checks GitHub for the newest jog release, downloads this platform's
+binary, verifies its sha256 against the release's checksums.txt, and
+replaces the running executable in place. Prints "already up to date"
+when there is nothing newer. Nothing else changes — settings, hooks,
+and snapshots are untouched by an update.
+
+jog also updates on its own: a background `jog update --check`
+refreshes a small cache on the updateCheck cadence — daily by default,
+`jog config updateCheck 2.weeks` to change it — and when it finds
+a newer release, jog installs it in the background; your next command
+runs the new version. `jog config autoUpdate false` prints a
+one-line notice instead — once per release, only on a terminal, never
+from hooks — and `jog config updateCheck false` turns all of it
+off. --check only rewrites the cache; it never installs anything.
+
+Installs that belong to another tool are recognized and left alone:
+a jog built from source is updated with
+go install github.com/tyler-johnson/jog/cmd/jog@latest, and a
+Homebrew install with brew upgrade jog — jog update says which. If the
+install directory isn't writable, re-run with the needed permissions
+(e.g. sudo).
+
+Set GITHUB_TOKEN to authenticate the release lookup if the anonymous
+GitHub API rate limit ever bites.

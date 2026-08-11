@@ -1,0 +1,14 @@
+jog shell install — add the git alias to your shell
+
+usage:
+  jog shell install [<shell>…]
+
+Appends one marked line — `alias git='jog git'` (PowerShell: a git
+function) — to the shell's rc file, creating the file if needed. With
+no names it targets your login shell ($SHELL; PowerShell on Windows);
+name shells to wire others, rc file or not. An alias you added by hand
+is recognized and left alone.
+
+Takes effect in new shells; source the rc file to get it in this one.
+
+supported: bash, zsh, fish, powershell

@@ -1,0 +1,19 @@
+jog trim — drop old snapshots
+
+usage:
+  jog trim [--dry-run] [--gone]
+
+Drops every snapshot older than the keep setting, which defaults to
+90 days ("jog config keep 30.days" changes it; "never" keeps
+everything). A chain whose snapshots have all aged out is removed
+whole — deleted branches' timelines eventually vanish on their own, and
+--gone removes them right away. With the maxSize setting, trim also
+drops oldest snapshots beyond a total disk budget; the budget is one
+snapshot lenient — the snapshot that crosses it survives — so even a
+tiny maxSize leaves the newest snapshot. This is the only jog command
+that discards snapshots, and it never runs on its own. The pre-trim
+state survives at refs/jog/@trash/<branch> until the trim after next.
+
+options:
+  -n, --dry-run   print the plan, touch nothing
+  --gone          drop chains whose branch no longer exists, whatever their age
