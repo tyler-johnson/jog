@@ -2310,10 +2310,11 @@ func TestShell(t *testing.T) {
 func TestInstallInteractive(t *testing.T) {
 	newHome := func() (string, []string) {
 		home := t.TempDir()
-		// ~/.claude and ~/.vim make exactly one agent and one editor
-		// detectable (PATH carries only git, so LookPath finds nothing).
-		for _, d := range []string{".claude", ".vim"} {
-			if err := os.MkdirAll(filepath.Join(home, d), 0o755); err != nil {
+		// ~/.claude and the vim runtime root make exactly one agent and
+		// one editor detectable (PATH carries only git, so LookPath finds
+		// nothing).
+		for _, d := range []string{filepath.Join(home, ".claude"), filepath.Dir(filepath.Dir(vimPluginPath(home)))} {
+			if err := os.MkdirAll(d, 0o755); err != nil {
 				t.Fatal(err)
 			}
 		}
@@ -2336,7 +2337,7 @@ func TestInstallInteractive(t *testing.T) {
 	if b := string(mustRead(t, loginRC)); !strings.Contains(b, "jog git") {
 		t.Errorf("login rc missing alias:\n%s", b)
 	}
-	if b := string(mustRead(t, filepath.Join(home, ".claude", "settings.json"))); !strings.Contains(b, "jog hook claude") {
+	if b := string(mustRead(t, filepath.Join(home, ".claude", "settings.json"))); !strings.Contains(b, hookNeedle("claude")) {
 		t.Errorf("claude settings not wired:\n%s", b)
 	}
 	if _, err := os.Stat(vimPluginPath(home)); err != nil {
@@ -2393,8 +2394,8 @@ func TestInstallInteractive(t *testing.T) {
 // single confirmation, and the sweep across all three surfaces.
 func TestUninstallCommand(t *testing.T) {
 	home := t.TempDir()
-	for _, d := range []string{".claude", ".vim"} {
-		if err := os.MkdirAll(filepath.Join(home, d), 0o755); err != nil {
+	for _, d := range []string{filepath.Join(home, ".claude"), filepath.Dir(filepath.Dir(vimPluginPath(home)))} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
 			t.Fatal(err)
 		}
 	}
