@@ -72,10 +72,6 @@ reversible.
   branches, or config. If jog vanished tomorrow, stock git reads every
   snapshot ([see below](#no-lock-in)).
 
-> [!NOTE]
-> jog is under active daily dogfood. The snapshot engine's behavior is
-> lab-verified against git 2.50; every verified fact ships as a test.
-
 ## Install
 
 **1. Install the binary:**
