@@ -235,7 +235,7 @@ func Pending(version string) string {
 // brew owns its binaries, and gatesOpen has already excluded source
 // builds by the time this is asked.
 func isAutoCapable(exe string) bool {
-	return !isBrewInstall(exe)
+	return !IsBrewInstall(exe)
 }
 
 // autoUpdateDue is the pure decision core behind auto-update: a newer
@@ -274,7 +274,7 @@ func pendingNotice(s checkState, version, exe string, tty, enabled bool) string 
 		return ""
 	}
 	cmd := "jog update"
-	if isBrewInstall(exe) {
+	if IsBrewInstall(exe) {
 		cmd = "brew upgrade jog"
 	}
 	return fmt.Sprintf("jog: %s is available (running %s) — update with: %s", s.Latest, version, cmd)

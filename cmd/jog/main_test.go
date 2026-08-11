@@ -810,8 +810,16 @@ func TestLogAll(t *testing.T) {
 // for doctor's wiring checks).
 func runJogEnv(t *testing.T, dir string, extraEnv []string, args ...string) (stdout, stderr string, code int) {
 	t.Helper()
+	return runJogEnvStdin(t, dir, extraEnv, "", args...)
+}
+
+// runJogEnvStdin is runJogEnv with input on stdin — how the interactive
+// `jog install` / `jog uninstall` answers are piped in.
+func runJogEnvStdin(t *testing.T, dir string, extraEnv []string, stdin string, args ...string) (stdout, stderr string, code int) {
+	t.Helper()
 	cmd := exec.Command(jogBin, args...)
 	cmd.Dir = dir
+	cmd.Stdin = strings.NewReader(stdin)
 	cmd.Env = append(append(os.Environ(),
 		"GIT_CONFIG_GLOBAL="+os.DevNull, "GIT_CONFIG_SYSTEM="+os.DevNull,
 		"GIT_AUTHOR_NAME=test", "GIT_AUTHOR_EMAIL=test@example.com",
@@ -927,6 +935,20 @@ func TestDoctor(t *testing.T) {
 	stdout, _, code = runJogEnv(t, tr2.Dir, fakeHome(bare), "doctor")
 	if code != 1 || !strings.Contains(stdout, "neither the alias nor agent/editor hooks") {
 		t.Errorf("no triggers: code=%d\n%s", code, stdout)
+	}
+
+	// A `jog shell install`ed alias is reported as managed, not
+	// heuristic, and clears the silent-engine finding.
+	marked := "alias git='jog git' # jog — added by `jog shell install`\n"
+	if err := os.WriteFile(filepath.Join(bare, ".bashrc"), []byte(marked), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	stdout, _, code = runJogEnv(t, tr2.Dir, fakeHome(bare), "doctor")
+	if code != 0 || !strings.Contains(stdout, "`jog shell` manages it") {
+		t.Errorf("managed alias: code=%d\n%s", code, stdout)
+	}
+	if strings.Contains(stdout, "neither the alias") {
+		t.Errorf("managed alias should clear the triggers warning:\n%s", stdout)
 	}
 }
 
@@ -1308,7 +1330,7 @@ func TestVerbAliases(t *testing.T) {
 // --help) belongs to real git. (TestHelp covers the global forms.)
 func TestPerCommandHelp(t *testing.T) {
 	dir := t.TempDir() // outside any repo: help must not need one
-	verbs := []string{"log", "snaps", "pick", "since", "restore", "back", "trim", "config", "doctor", "hook", "agents", "agent", "editors", "editor", "editor-hook", "update"}
+	verbs := []string{"log", "snaps", "pick", "since", "restore", "back", "trim", "config", "doctor", "hook", "agents", "agent", "editors", "editor", "editor-hook", "update", "shell", "install", "uninstall"}
 	for _, v := range verbs {
 		stdout, _, code := runJog(t, dir, v, "--help")
 		if code != 0 || !strings.Contains(stdout, "usage:") || !strings.Contains(stdout, v) {
@@ -2167,4 +2189,251 @@ func mustRead(t *testing.T, path string) []byte {
 		t.Fatal(err)
 	}
 	return b
+}
+
+// loginShellFixture is the login shell the tests can rely on per OS:
+// $SHELL=/bin/zsh on unix, always PowerShell on Windows (no $SHELL
+// there). Returns the shell's name, rc path, tilde display, and the
+// marked line `jog shell install` writes.
+func loginShellFixture(home string) (name, rc, display, markedLine string) {
+	if runtime.GOOS == "windows" {
+		return "powershell",
+			filepath.Join(home, "Documents", "PowerShell", "Microsoft.PowerShell_profile.ps1"),
+			"~/Documents/PowerShell/Microsoft.PowerShell_profile.ps1",
+			"function git { jog git @args } # jog — added by `jog shell install`"
+	}
+	return "zsh", filepath.Join(home, ".zshrc"), "~/.zshrc",
+		"alias git='jog git' # jog — added by `jog shell install`"
+}
+
+// TestShell covers `jog shell`: the marked alias line in rc files —
+// login-shell default, forcing by name, hand-added aliases left alone,
+// and surgical uninstall.
+func TestShell(t *testing.T) {
+	home := t.TempDir()
+	env := append(fakeHome(home), "SHELL=/bin/zsh")
+	loginName, loginRC, loginDisplay, markedLine := loginShellFixture(home)
+
+	// No names: the login shell is the target; the rc file is created
+	// when missing.
+	stdout, _, code := runJogEnv(t, home, env, "shell", "install")
+	if code != 0 || !strings.Contains(stdout, "installed — "+loginDisplay) {
+		t.Fatalf("shell install: code=%d\n%s", code, stdout)
+	}
+	if b := mustRead(t, loginRC); !strings.Contains(string(b), markedLine) {
+		t.Errorf("login rc missing the marked line:\n%s", b)
+	}
+
+	// Idempotent.
+	stdout, _, code = runJogEnv(t, home, env, "shell", "install")
+	if code != 0 || !strings.Contains(stdout, "already installed") {
+		t.Errorf("re-install: code=%d\n%s", code, stdout)
+	}
+
+	// Named shells force, whatever the login shell is; existing content
+	// is preserved, and fish gets its own spelling under ~/.config.
+	const bashMarked = "alias git='jog git' # jog — added by `jog shell install`"
+	bashrc := filepath.Join(home, ".bashrc")
+	if err := os.WriteFile(bashrc, []byte("export FOO=1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	stdout, _, code = runJogEnv(t, home, env, "shell", "install", "bash", "fish")
+	if code != 0 || !strings.Contains(stdout, ".bashrc") || !strings.Contains(stdout, "config.fish") {
+		t.Fatalf("forced install: code=%d\n%s", code, stdout)
+	}
+	if b := string(mustRead(t, bashrc)); !strings.HasPrefix(b, "export FOO=1\n") || !strings.Contains(b, bashMarked) {
+		t.Errorf(".bashrc content wrong:\n%s", b)
+	}
+	fishrc := filepath.Join(home, ".config", "fish", "config.fish")
+	if b := string(mustRead(t, fishrc)); !strings.Contains(b, "alias git 'jog git'") {
+		t.Errorf("config.fish missing the fish spelling:\n%s", b)
+	}
+
+	// list shows what's wired.
+	stdout, _, code = runJogEnv(t, home, env, "shell", "list")
+	if code != 0 || !strings.Contains(stdout, loginDisplay) || !strings.Contains(stdout, "installed") {
+		t.Errorf("list: code=%d\n%s", code, stdout)
+	}
+
+	// Bare uninstall sweeps every rc file carrying the marker — and only
+	// the marker line goes.
+	stdout, _, code = runJogEnv(t, home, env, "shell", "uninstall")
+	if code != 0 || !strings.Contains(stdout, "removed the alias") {
+		t.Fatalf("uninstall: code=%d\n%s", code, stdout)
+	}
+	if b := string(mustRead(t, bashrc)); b != "export FOO=1\n" {
+		t.Errorf(".bashrc not restored: %q", b)
+	}
+	for _, rc := range []string{loginRC, fishrc} {
+		if b, err := os.ReadFile(rc); err == nil && strings.Contains(string(b), "jog git") {
+			t.Errorf("%s still has the alias:\n%s", rc, b)
+		}
+	}
+
+	// A hand-written alias is recognized and never touched — by install
+	// or uninstall. (The `alias` spelling stands in for any line
+	// invoking `jog git` — detection is the same on every shell.)
+	hand := "alias git='jog git'\n"
+	if err := os.WriteFile(loginRC, []byte(hand), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	stdout, _, code = runJogEnv(t, home, env, "shell", "install")
+	if code != 0 || !strings.Contains(stdout, "by hand") {
+		t.Errorf("hand-added install: code=%d\n%s", code, stdout)
+	}
+	stdout, _, code = runJogEnv(t, home, env, "shell", "uninstall", loginName)
+	if code != 0 || !strings.Contains(stdout, "not added by jog") {
+		t.Errorf("hand-added uninstall: code=%d\n%s", code, stdout)
+	}
+	if b := string(mustRead(t, loginRC)); b != hand {
+		t.Errorf("hand-written rc modified: %q", b)
+	}
+
+	// Usage errors: bare, unknown shell, unreadable $SHELL.
+	if _, stderr, code := runJogEnv(t, home, env, "shell"); code != 2 || !strings.Contains(stderr, "usage") {
+		t.Errorf("bare shell: code=%d %q", code, stderr)
+	}
+	if _, stderr, code := runJogEnv(t, home, env, "shell", "install", "tcsh"); code != 2 || !strings.Contains(stderr, "unknown shell") {
+		t.Errorf("unknown shell: code=%d %q", code, stderr)
+	}
+	if runtime.GOOS != "windows" { // windows has no $SHELL; the login shell is always powershell
+		badEnv := append(fakeHome(home), "SHELL=/bin/tcsh")
+		if _, stderr, code := runJogEnv(t, home, badEnv, "shell", "install"); code != 2 || !strings.Contains(stderr, "cannot tell your shell") {
+			t.Errorf("unknown $SHELL: code=%d %q", code, stderr)
+		}
+	}
+}
+
+// TestInstallInteractive covers `jog install`: piped answers drive the
+// wizard, EOF stops it without losing completed steps, and --yes takes
+// every default silently.
+func TestInstallInteractive(t *testing.T) {
+	newHome := func() (string, []string) {
+		home := t.TempDir()
+		// ~/.claude and ~/.vim make exactly one agent and one editor
+		// detectable (PATH carries only git, so LookPath finds nothing).
+		for _, d := range []string{".claude", ".vim"} {
+			if err := os.MkdirAll(filepath.Join(home, d), 0o755); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return home, append(fakeHome(home), "SHELL=/bin/zsh")
+	}
+
+	// All yes: alias, claude, vim.
+	home, env := newHome()
+	_, loginRC, loginDisplay, markedLine := loginShellFixture(home)
+	stdout, _, code := runJogEnvStdin(t, home, env, "y\ny\ny\n", "install")
+	if code != 0 {
+		t.Fatalf("install: code=%d\n%s", code, stdout)
+	}
+	loginLine := strings.SplitN(markedLine, " # jog", 2)[0]
+	for _, want := range []string{"add `" + loginLine + "` to " + loginDisplay + "?", "detected agents (claude)", "vim detected"} {
+		if !strings.Contains(stdout, want) {
+			t.Errorf("install output missing %q:\n%s", want, stdout)
+		}
+	}
+	if b := string(mustRead(t, loginRC)); !strings.Contains(b, "jog git") {
+		t.Errorf("login rc missing alias:\n%s", b)
+	}
+	if b := string(mustRead(t, filepath.Join(home, ".claude", "settings.json"))); !strings.Contains(b, "jog hook claude") {
+		t.Errorf("claude settings not wired:\n%s", b)
+	}
+	if _, err := os.Stat(vimPluginPath(home)); err != nil {
+		t.Errorf("vim hook not installed: %v", err)
+	}
+
+	// All no: nothing changes.
+	home2, env2 := newHome()
+	_, loginRC2, _, _ := loginShellFixture(home2)
+	stdout, _, code = runJogEnvStdin(t, home2, env2, "n\nn\nn\n", "install")
+	if code != 0 {
+		t.Fatalf("all-no install: code=%d\n%s", code, stdout)
+	}
+	for _, p := range []string{loginRC2, filepath.Join(home2, ".claude", "settings.json")} {
+		if _, err := os.Stat(p); !os.IsNotExist(err) {
+			t.Errorf("all-no install created %s", p)
+		}
+	}
+
+	// EOF after the first answer: the alias stays, the rest is skipped.
+	home3, env3 := newHome()
+	_, loginRC3, _, _ := loginShellFixture(home3)
+	stdout, _, code = runJogEnvStdin(t, home3, env3, "y\n", "install")
+	if code != 0 || !strings.Contains(stdout, "stopped early") {
+		t.Fatalf("EOF install: code=%d\n%s", code, stdout)
+	}
+	if _, err := os.Stat(loginRC3); err != nil {
+		t.Errorf("EOF install lost the completed alias step: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(home3, ".claude", "settings.json")); !os.IsNotExist(err) {
+		t.Errorf("EOF install still wired agents")
+	}
+
+	// --yes: no stdin at all, every default taken.
+	home4, env4 := newHome()
+	stdout, _, code = runJogEnvStdin(t, home4, env4, "", "install", "--yes")
+	if code != 0 {
+		t.Fatalf("install --yes: code=%d\n%s", code, stdout)
+	}
+	if _, err := os.Stat(filepath.Join(home4, ".claude", "settings.json")); err != nil {
+		t.Errorf("--yes skipped agents: %v", err)
+	}
+	if _, err := os.Stat(vimPluginPath(home4)); err != nil {
+		t.Errorf("--yes skipped vim: %v", err)
+	}
+
+	// Unknown flag.
+	if _, stderr, code := runJogEnv(t, home, env, "install", "--nope"); code != 2 || !strings.Contains(stderr, "usage") {
+		t.Errorf("install --nope: code=%d %q", code, stderr)
+	}
+}
+
+// TestUninstallCommand covers `jog uninstall`: the wired summary, the
+// single confirmation, and the sweep across all three surfaces.
+func TestUninstallCommand(t *testing.T) {
+	home := t.TempDir()
+	for _, d := range []string{".claude", ".vim"} {
+		if err := os.MkdirAll(filepath.Join(home, d), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	env := append(fakeHome(home), "SHELL=/bin/zsh")
+	_, loginRC, _, _ := loginShellFixture(home)
+	if stdout, _, code := runJogEnvStdin(t, home, env, "", "install", "--yes"); code != 0 {
+		t.Fatalf("seed install: code=%d\n%s", code, stdout)
+	}
+
+	// Declined: everything stays.
+	stdout, _, code := runJogEnvStdin(t, home, env, "n\n", "uninstall")
+	if code != 0 || !strings.Contains(stdout, "currently wired:") || !strings.Contains(stdout, "nothing removed") {
+		t.Fatalf("declined uninstall: code=%d\n%s", code, stdout)
+	}
+	if _, err := os.Stat(vimPluginPath(home)); err != nil {
+		t.Errorf("declined uninstall removed the vim hook: %v", err)
+	}
+
+	// Confirmed via --yes: alias, agent wiring, editor hook all gone.
+	stdout, _, code = runJogEnvStdin(t, home, env, "", "uninstall", "--yes")
+	if code != 0 || !strings.Contains(stdout, "snapshots are untouched") {
+		t.Fatalf("uninstall --yes: code=%d\n%s", code, stdout)
+	}
+	if b := string(mustRead(t, loginRC)); strings.Contains(b, "jog git") {
+		t.Errorf("login rc still aliased:\n%s", b)
+	}
+	if b := string(mustRead(t, filepath.Join(home, ".claude", "settings.json"))); strings.Contains(b, "jog hook") {
+		t.Errorf("claude settings still wired:\n%s", b)
+	}
+	if _, err := os.Stat(vimPluginPath(home)); !os.IsNotExist(err) {
+		t.Errorf("vim hook survived uninstall")
+	}
+	if _, err := os.Stat(filepath.Join(home, ".claude", "skills", "jog", "SKILL.md")); !os.IsNotExist(err) {
+		t.Errorf("claude skill survived uninstall")
+	}
+
+	// Nothing wired: says so, exits 0.
+	stdout, _, code = runJogEnvStdin(t, home, env, "", "uninstall", "--yes")
+	if code != 0 || !strings.Contains(stdout, "nothing is wired") {
+		t.Errorf("empty uninstall: code=%d\n%s", code, stdout)
+	}
 }

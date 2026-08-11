@@ -100,9 +100,16 @@ checks weekly in the background and mentions a new release once, after a
 git command; `jog config autoUpdate true` installs it silently instead,
 and `jog config updateCheck false` opts out of all of it.
 
-**2. Add the alias** — this is how you "remember" to snapshot: you don't.
-Muscle memory is the trigger; the compulsive `git status` tic becomes the
-snapshot heartbeat.
+**2. Wire it up:**
+
+```sh
+jog install   # guided — asks about the alias, agents, and editors, one question each
+```
+
+The alias is how you "remember" to snapshot: you don't. Muscle memory is
+the trigger; the compulsive `git status` tic becomes the snapshot
+heartbeat. `jog install` adds it to your shell's rc file (`jog shell
+install` does just that piece); by hand it's:
 
 ```sh
 # bash / zsh (~/.bashrc / ~/.zshrc)
@@ -121,18 +128,13 @@ Scripts, IDEs, and CI are untouched — they resolve `git` on PATH and get real
 git. That's a feature: jog stays out of every code path that expects exact
 git behavior.
 
-**3. Wire up your agents and editors** (optional):
+The other two surfaces have their own commands too — `jog agents install`
+(hooks + skill for every agent client on this machine) and
+`jog editors install vim` (a post-save hook, one editor at a time). The
+[Agents](#agents) and [Editors](#editors) sections below have the full
+picture, and `jog uninstall` reverses everything `jog install` wired.
 
-```sh
-jog agents install        # hooks + skill for every agent client on this machine
-jog editors install vim   # a post-save hook for your editor, one at a time
-```
-
-The [Agents](#agents) and [Editors](#editors) sections below have the
-full picture — what's supported, where the wiring lands, and what each
-surface does.
-
-**4. Verify:** make any change in a repo, run `git status`, then `jog log`
+**3. Verify:** make any change in a repo, run `git status`, then `jog log`
 — you should see a `pre: git status` entry.
 
 ## Agents
@@ -237,6 +239,8 @@ Two disjoint namespaces, one rule: **`jog git` is the only door to git.**
 | `jog trim [--dry-run] [--gone]` | drop snapshots older than `jog.keep` (default 90 days); `--gone` also drops deleted branches' chains; the previous tip stays at `refs/jog/@trash/<branch>` until the next trim |
 | `jog config [key [value]]` | list jog's settings with values and meanings — or get and set them |
 | `jog doctor [--fix]` | verify invariants, wiring, and liveness (`--fix` repairs the gc config) |
+| `jog install [--yes]` | guided setup — the alias, agent hooks, and editor hooks, one question each (`--yes` takes the defaults; `jog uninstall` reverses it) |
+| `jog shell install` | the git alias in your login shell's rc file (`uninstall`, `list`; or name bash, zsh, fish, powershell) |
 | `jog agents install` | hooks + skill for every agent client on this machine (`uninstall`, `list`; `[hooks\|skill]` and client names narrow it; `--project`: this repo) |
 | `jog editors install <name>` | a post-save snapshot hook for one text editor (`uninstall`, `list`) |
 | `jog update` | update jog to the latest release, sha256-verified (script/binary installs; brew and go installs are pointed at their own upgrade command) |

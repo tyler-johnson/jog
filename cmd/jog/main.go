@@ -21,6 +21,8 @@ import (
 	"github.com/tyler-johnson/jog/internal/cli"
 	"github.com/tyler-johnson/jog/internal/editors"
 	"github.com/tyler-johnson/jog/internal/selfupdate"
+	"github.com/tyler-johnson/jog/internal/setup"
+	"github.com/tyler-johnson/jog/internal/shell"
 )
 
 const usage = `jog — a memory for your working tree
@@ -32,6 +34,8 @@ usage:
   jog since [T] [path]         what changed since a snapshot (default: last command boundary)
   jog restore <path> [--at T]  restore files from a snapshot
   jog restore --all [--at T]   restore the whole working tree
+  jog install [--yes]          guided setup: the alias, agent hooks, editor hooks (uninstall reverses it)
+  jog shell install            the git alias in your shell's rc file (uninstall, list)
   jog agents install           hooks + skill for every agent client on this machine (uninstall, list; --project)
   jog editors install <name>   post-save snapshots for one text editor (uninstall, list)
   jog hook <client>            agent hook entry point (reads JSON on stdin)
@@ -257,6 +261,60 @@ names are the ones ` + "`jog agents list`" + ` shows.
 	"agent":   agentsHelp,
 	"editors": editorsHelp,
 	"editor":  editorsHelp,
+	"shell": `jog shell — the git alias in your shell
+
+usage:
+  jog shell install [<shell>…]
+  jog shell uninstall [<shell>…]
+  jog shell list
+
+Adds ` + "`alias git='jog git'`" + ` to your shell's rc file — the
+interactive trigger: every git command you type snapshots first.
+Scripts, IDEs, and CI are untouched; they resolve git on PATH and get
+real git.
+
+The alias is one marked line appended to the rc file; uninstall removes
+exactly that line and nothing else. An alias you added by hand is
+recognized and never touched. With no names, install targets your login
+shell ($SHELL; PowerShell on Windows) and uninstall sweeps every rc
+file carrying jog's line; naming shells overrides both.
+
+supported: bash, zsh, fish, powershell
+`,
+	"install": `jog install — guided setup
+
+usage:
+  jog install [--yes]
+
+Walks through jog's three wiring surfaces, one question each: the git
+alias for your shell (` + "`jog shell install`" + `), hooks + skill for
+the agent clients on this machine (` + "`jog agents install`" + `), and
+a post-save hook per detected editor (` + "`jog editors install`" + `).
+Each yes runs the same installer the standalone command runs — nothing
+here is reachable only through the wizard, and everything is additive
+and idempotent: re-running is always safe.
+
+--yes takes every default without asking (login-shell alias, detected
+agents, detected editors) — for scripts and dotfiles.
+
+` + "`jog uninstall`" + ` reverses all of it; ` + "`jog doctor`" + ` verifies the wiring.
+`,
+	"uninstall": `jog uninstall — remove jog's wiring
+
+usage:
+  jog uninstall [--yes]
+
+Shows what is currently wired — the shell alias, agent hooks and
+skills, editor save hooks — and removes all of it after one
+confirmation (--yes skips the question). Only jog's own lines and files
+are touched: a hand-written alias, your settings, and anything carrying
+your edits are left alone, with a note.
+
+Snapshots are not deleted — they live in each repo at refs/jog/* and
+` + "`jog trim`" + ` manages them. The jog binary itself is also left in
+place; the closing line names the right way to remove it for how it was
+installed.
+`,
 	"editor-hook": `jog editor-hook — editor save hook entry point
 
 usage:
@@ -391,6 +449,12 @@ func run(args []string) int {
 		return agents.Run(args[1:])
 	case "editors", "editor":
 		return editors.Run(args[1:])
+	case "shell":
+		return shell.Run(args[1:])
+	case "install":
+		return setup.Install(args[1:])
+	case "uninstall":
+		return setup.Uninstall(args[1:])
 	case "editor-hook":
 		// Runtime entry wired by `jog editors install`: exit 0 always,
 		// print nothing — output lands in the editor's UI. (A saved file

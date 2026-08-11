@@ -60,6 +60,5 @@ if (($env:Path -split ';') -notcontains $installDir) {
 
 Write-Host ''
 Write-Host 'next steps:'
-Write-Host '  function git { jog git @args }   # add to your PowerShell profile ($PROFILE)'
-Write-Host '  jog agents install               # hooks + skill for coding agents'
-Write-Host '  jog doctor                       # verify the wiring'
+Write-Host '  jog install     # guided setup: the git alias, agent hooks, editor hooks'
+Write-Host '  jog doctor      # verify the wiring'

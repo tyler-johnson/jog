@@ -46,9 +46,10 @@ type editor struct {
 var registry = []editor{vimEditor, nvimEditor, emacsEditor, sublimeEditor,
 	kakouneEditor, microEditor, vscodeEditor, jetbrainsEditor}
 
-// Status is one editor's wiring, as doctor reports it.
+// Status is one editor's wiring, as doctor and `jog install` consume it.
 type Status struct {
 	Name     string
+	Detected bool   // plausibly on this machine
 	Location string // "" when not installed
 }
 
@@ -56,7 +57,7 @@ type Status struct {
 func Statuses() []Status {
 	out := make([]Status, len(registry))
 	for i, e := range registry {
-		out[i] = Status{Name: e.name, Location: e.where()}
+		out[i] = Status{Name: e.name, Detected: e.detect(), Location: e.where()}
 	}
 	return out
 }

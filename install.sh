@@ -86,6 +86,5 @@ case ":$PATH:" in
 esac
 echo ""
 echo "next steps:"
-echo "  alias git='jog git'     # every git command snapshots first"
-echo "  jog agents install      # hooks + skill for coding agents"
-echo "  jog doctor              # verify the wiring"
+echo "  jog install     # guided setup: the git alias, agent hooks, editor hooks"
+echo "  jog doctor      # verify the wiring"

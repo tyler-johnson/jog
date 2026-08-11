@@ -43,9 +43,10 @@ type client struct {
 
 var clients = []client{claudeAgent, codexAgent, copilotAgent, cursorAgent, geminiAgent, opencodeAgent}
 
-// Status is one client's wiring, as doctor reports it.
+// Status is one client's wiring, as doctor and `jog install` consume it.
 type Status struct {
 	Name          string
+	Detected      bool   // plausibly on this machine
 	HooksLocation string // "" when not wired
 	SkillLocation string // "" when not installed
 }
@@ -54,7 +55,8 @@ type Status struct {
 func Statuses() []Status {
 	out := make([]Status, len(clients))
 	for i, c := range clients {
-		out[i] = Status{Name: c.name, HooksLocation: c.whereHooks(), SkillLocation: c.skillLocation()}
+		out[i] = Status{Name: c.name, Detected: c.detected(),
+			HooksLocation: c.whereHooks(), SkillLocation: c.skillLocation()}
 	}
 	return out
 }

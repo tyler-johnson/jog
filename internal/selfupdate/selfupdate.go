@@ -156,13 +156,13 @@ func classifyInstall(version, exe string) string {
 	if !releaseVersion.MatchString(version) {
 		return "jog was built from source — update with: go install github.com/tyler-johnson/jog/cmd/jog@latest"
 	}
-	if isBrewInstall(exe) {
+	if IsBrewInstall(exe) {
 		return "jog was installed with Homebrew — update with: brew upgrade jog"
 	}
 	return ""
 }
 
-func isBrewInstall(exe string) bool {
+func IsBrewInstall(exe string) bool {
 	p := filepath.ToSlash(exe)
 	for _, brew := range []string{"/Cellar/", "/opt/homebrew/", "/home/linuxbrew/"} {
 		if strings.Contains(p, brew) {

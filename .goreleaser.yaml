@@ -51,11 +51,10 @@ brews:
     caveats: |
       jog only snapshots when something invokes it. Wire the triggers:
 
-        1. Shell alias (bash/zsh):  alias git='jog git'
-        2. Agent hooks + skills:    jog agents install
-        3. Editor save hooks:       jog editors install <editor>
+        jog install    # guided: the git alias, agent hooks, editor hooks
 
-      Then verify with:  jog doctor
+      or piece by piece: jog shell install, jog agents install,
+      jog editors install <editor>. Then verify with:  jog doctor
 
 release:
   draft: false

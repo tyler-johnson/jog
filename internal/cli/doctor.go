@@ -13,6 +13,7 @@ import (
 	"github.com/tyler-johnson/jog/internal/editors"
 	"github.com/tyler-johnson/jog/internal/gitx"
 	"github.com/tyler-johnson/jog/internal/selfupdate"
+	"github.com/tyler-johnson/jog/internal/shell"
 	"github.com/tyler-johnson/jog/internal/snap"
 )
 
@@ -298,30 +299,46 @@ func (d *doctor) checkTriggers() {
 		d.info("editors", fmt.Sprintf("%d supported, not integrated (optional — `jog editors install <name>`)", absentEditors))
 	}
 
+	// The alias: precise when jog installed it (`jog shell` leaves a
+	// marked line), heuristic for one the user wrote — an rc-file grep
+	// can't see a live shell's aliases, so those are reported, never
+	// asserted.
 	aliasFile := ""
-	rcs := []string{".bashrc", ".zshrc", ".config/fish/config.fish", ".profile"}
-	if runtime.GOOS == "windows" {
-		// PowerShell's `function git { jog git @args }` lives in the
-		// profile; both the modern and Windows-PowerShell locations count.
-		rcs = append(rcs,
-			"Documents/PowerShell/Microsoft.PowerShell_profile.ps1",
-			"Documents/WindowsPowerShell/Microsoft.PowerShell_profile.ps1")
-	}
-	for _, rc := range rcs {
-		b, err := os.ReadFile(filepath.Join(home, filepath.FromSlash(rc)))
-		if err == nil && strings.Contains(string(b), "jog git") {
-			aliasFile = "~/" + rc
+	managed := false
+	for _, s := range shell.Statuses() {
+		if s.Installed {
+			aliasFile, managed = s.RC, true
 			break
 		}
+		if s.ByHand && aliasFile == "" {
+			aliasFile = s.RC
+		}
 	}
-	if aliasFile != "" {
+	if aliasFile == "" {
+		// rc files jog doesn't manage still count for the hand-added sweep.
+		rcs := []string{".profile"}
+		if runtime.GOOS == "windows" {
+			rcs = append(rcs, "Documents/WindowsPowerShell/Microsoft.PowerShell_profile.ps1")
+		}
+		for _, rc := range rcs {
+			b, err := os.ReadFile(filepath.Join(home, filepath.FromSlash(rc)))
+			if err == nil && strings.Contains(string(b), "jog git") {
+				aliasFile = "~/" + rc
+				break
+			}
+		}
+	}
+	switch {
+	case managed:
+		d.ok("alias", "`git='jog git'` installed in "+aliasFile+" (`jog shell` manages it)")
+	case aliasFile != "":
 		d.info("alias", "`git='jog git'` found in "+aliasFile+" (heuristic — check `type git` in your shell)")
-	} else {
+	default:
 		d.info("alias", "no `jog git` alias found in shell rc files (heuristic)")
 	}
 
 	if !hooks && aliasFile == "" {
-		d.warn("triggers", "neither the alias nor agent/editor hooks are wired — snapshots only happen when you run `jog` by hand (`jog agents install`, `jog editors install <name>`, or add the alias)")
+		d.warn("triggers", "neither the alias nor agent/editor hooks are wired — snapshots only happen when you run `jog` by hand (`jog install` walks through the setup)")
 	}
 }
 
