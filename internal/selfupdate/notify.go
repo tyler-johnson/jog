@@ -14,28 +14,25 @@ package selfupdate
 import (
 	"encoding/json"
 	"fmt"
-	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"time"
 
 	"golang.org/x/term"
 
+	"github.com/tyler-johnson/jog/internal/cadence"
 	"github.com/tyler-johnson/jog/internal/gitx"
 )
 
 // defaultCheckInterval is how long a completed check (successful or
 // not) silences the background refresh when jog.updateCheck doesn't
 // name a cadence of its own.
-const defaultCheckInterval = 24 * time.Hour
+const defaultCheckInterval = cadence.Default
 
-// minCheckInterval floors a configured cadence: git's expiry parser is
-// lenient enough to turn odd values into "now", and a per-command
-// network check must never be what a typo buys.
-const minCheckInterval = time.Minute
+// minCheckInterval floors a configured cadence — see cadence.Min.
+const minCheckInterval = cadence.Min
 
 // autoInterval throttles auto-update: while a release is pending, the
 // config probe (and any install it launches) runs at most daily, so a
@@ -63,10 +60,7 @@ type checkState struct {
 // default: that is how often the config is re-read to notice a
 // re-enable.
 func (s checkState) interval() time.Duration {
-	if s.IntervalSecs > 0 {
-		return time.Duration(s.IntervalSecs) * time.Second
-	}
-	return defaultCheckInterval
+	return cadence.Interval(s.IntervalSecs)
 }
 
 // statePath is <user cache dir>/jog/update.json — XDG_CACHE_HOME or
@@ -148,59 +142,23 @@ func gatesOpen(version string) bool {
 
 // configCheckInterval is the expensive half — a git spawn or two — so
 // callers only reach it when the cache is stale or an update is
-// pending; the common case pays nothing. jog.updateCheck holds a bool
-// (true = default cadence, false = off), a number of seconds (3600 =
-// hourly, 0 = off), or a git expiry duration ("12.hours", "2.weeks",
-// "never" = off). Unset defaults to daily. The raw value is inspected
-// before git's expiry parser sees it: approxidate happily reads "false"
-// as a date.
+// pending; the common case pays nothing. jog.updateCheck speaks the
+// shared cadence language (see internal/cadence): bool, seconds, or git
+// expiry syntax; unset defaults to daily. The check is global, so the
+// read runs from wherever jog happens to be — usually inside a repo,
+// where local config wins, which is the right repo to listen to.
 func configCheckInterval() (time.Duration, bool) {
-	raw, err := exec.Command(gitx.Bin(), "config", "--get", "jog.updateCheck").Output()
-	if err != nil {
-		return defaultCheckInterval, true
-	}
-	val := strings.ToLower(strings.TrimSpace(string(raw)))
-	switch val {
-	case "false", "no", "off", "never":
-		return 0, false
-	case "true", "yes", "on", "":
-		return defaultCheckInterval, true
-	}
-	// A bare number is seconds (3600 = hourly). The expiry parser must
-	// not see these: approxidate reads them as dates — "3600" is now,
-	// "7" is the 7th of this month.
-	if secs, err := strconv.ParseUint(val, 10, 63); err == nil {
-		if secs == 0 {
-			return 0, false
-		}
-		return max(time.Duration(secs)*time.Second, minCheckInterval), true
-	}
-	out, err := exec.Command(gitx.Bin(), "config", "--type=expiry-date", "--get", "jog.updateCheck").Output()
-	if err != nil {
-		return defaultCheckInterval, true
-	}
-	epoch, err := strconv.ParseUint(strings.TrimSpace(string(out)), 10, 64)
-	switch {
-	case err != nil:
-		return defaultCheckInterval, true
-	case epoch == 0:
-		// Expiry-speak for "never expire" — never check.
-		return 0, false
-	case epoch > math.MaxInt64:
-		// Expiry-speak for "expire everything" ("now", "all") — the
-		// shortest cadence there is.
-		return minCheckInterval, true
-	}
-	return max(time.Since(time.Unix(int64(epoch), 0)), minCheckInterval), true
+	return cadence.Read(func(typeFlags ...string) (string, error) {
+		args := append(append([]string{"config"}, typeFlags...), "--get", "jog.updateCheck")
+		out, err := exec.Command(gitx.Bin(), args...).Output()
+		return strings.TrimSpace(string(out)), err
+	})
 }
 
 // intervalSecs is the state-file encoding of configCheckInterval's
 // answer.
 func intervalSecs(iv time.Duration, enabled bool) int64 {
-	if !enabled {
-		return -1
-	}
-	return int64(iv / time.Second)
+	return cadence.Encode(iv, enabled)
 }
 
 // SyncInterval re-reads jog.updateCheck into the cache. `jog config`

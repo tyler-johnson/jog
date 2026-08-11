@@ -321,8 +321,9 @@ $ jog log --json src/ | jq -r '.[].provenance'
 $ jog log --format='%h %cI %s'  # any git log format, one entry per line
 ```
 
-**The timeline is getting long.** Drop everything older than 90 days
-(configurable):
+**The timeline is getting long.** Snapshots older than 90 days
+(configurable) age out on their own — a background trim rides a git
+command at most daily. The same command is there when you want it now:
 
 ```console
 $ jog trim --dry-run     # the plan, touching nothing
@@ -330,14 +331,15 @@ $ jog trim               # apply; the pre-trim tip stays at refs/jog/@trash/<bra
 $ jog trim --gone        # also drop chains whose branch no longer exists
 ```
 
-Trim is the only jog command that discards snapshots, it never runs on its
-own, and its last pre-trim state survives until the trim after next. A
+Trim is the only jog command that discards snapshots, and its last
+pre-trim state survives until the trim after next. A
 chain whose snapshots have all aged out is removed whole, so deleted
 branches' timelines eventually vanish on their own — `--gone` skips the
 wait. Both trim and `jog doctor` report how much disk the snapshots hold;
 the `maxSize` setting adds a total disk budget that trim enforces by
 dropping oldest snapshots first, one snapshot leniently — the snapshot
-that crosses the budget stays.
+that crosses the budget stays. `jog config autoTrim` changes the
+background cadence; `false` makes trim manual-only.
 
 ## What jog will never touch
 
@@ -383,10 +385,10 @@ Also worth knowing:
   refspecs, and `git bundle --all`. Your snapshots contain your scratch work
   — know your mirror scripts. (That includes `refs/jog/@trash/*`, which
   holds snapshots the last `jog trim` dropped, one cycle longer.)
-- Retention is manual: run `jog trim` when you want old snapshots dropped
-  — nothing schedules it behind your back. Space cost is low either way
-  (content-addressed, delta-compressed by repack); `jog doctor` shows the
-  actual number, and `maxSize` can cap it.
+- Retention runs itself: a daily background trim drops snapshots older
+  than `keep` (`jog config autoTrim false` makes trim manual-only). Space
+  cost is low either way (content-addressed, delta-compressed by repack);
+  `jog doctor` shows the actual number, and `maxSize` can cap it.
 - New files over 50 MiB are skipped (configurable, see below) and listed in
   the timeline entry.
 
@@ -402,6 +404,7 @@ validated through git's own parsers:
 | `jog.maxFileSize` | `50m` | skip new files larger than this (`0` disables the guard) |
 | `jog.keep` | `90.days` | `jog trim` drops snapshots older than this (`never` keeps everything) |
 | `jog.maxSize` | `0` (off) | total disk budget for snapshots — `jog trim` drops oldest first until the estimate fits (one snapshot lenient) |
+| `jog.autoTrim` | `1.day` | how often the background trim runs, per repo — git expiry syntax (`12.hours`, `2.weeks`), seconds (`3600`), or a bool (`false` means trim only runs by hand) |
 | `jog.updateCheck` | `1.day` | how often the background release check runs — git expiry syntax (`12.hours`, `2.weeks`), seconds (`3600`), or a bool (`false` disables updates and notices entirely, regardless of `autoUpdate`) |
 | `jog.autoUpdate` | `true` | install new releases in the background; the next command runs the new version (`false` prints a one-line notice once per release instead; brew and source installs always get the notice) |
 | `gc.refs/jog/*.reflogExpire` | `never` | set by jog on first snapshot; keeps gc off jog's reflogs |

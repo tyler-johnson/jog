@@ -51,6 +51,7 @@ func Snapshot(message string) int {
 		return 1
 	}
 	report(res)
+	maybeSpawnTrim(repo)
 	// D6: bare jog mirrors jj's no-arg default — snapshot, then show the
 	// top of the timeline.
 	if lines := recentEntries(repo, 3); len(lines) > 0 {
@@ -98,6 +99,10 @@ func Passthrough(gitArgs []string) int {
 			if _, serr := snap.Take(repo, provenance.PreGit(gitArgs)); serr != nil {
 				fmt.Fprintf(os.Stderr, "jog: snapshot skipped: %v\n", serr)
 			}
+			// Repo maintenance rides here too: a detached `jog trim` on
+			// the jog.autoTrim cadence. The child outlives the execve
+			// handoff below — it is its own process.
+			maybeSpawnTrim(repo)
 		} else if err != nil && !errors.Is(err, gitx.ErrNotARepo) {
 			fmt.Fprintf(os.Stderr, "jog: snapshot skipped: %v\n", err)
 		}

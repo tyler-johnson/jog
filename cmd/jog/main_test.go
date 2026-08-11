@@ -116,10 +116,14 @@ func runJogStdin(t *testing.T, dir, stdin string, args ...string) (stdout, stder
 	cmd := exec.Command(jogBin, args...)
 	cmd.Dir = dir
 	cmd.Stdin = strings.NewReader(stdin)
+	// CI=1 keeps background maintenance (auto-trim, update checks) from
+	// spawning detached children under every test; TestAutoTrim opts back
+	// in with CI= via runJogEnv.
 	cmd.Env = append(os.Environ(),
 		"GIT_CONFIG_GLOBAL="+os.DevNull, "GIT_CONFIG_SYSTEM="+os.DevNull,
 		"GIT_AUTHOR_NAME=test", "GIT_AUTHOR_EMAIL=test@example.com",
 		"GIT_COMMITTER_NAME=test", "GIT_COMMITTER_EMAIL=test@example.com",
+		"CI=1",
 	)
 	var so, se bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &so, &se
@@ -820,10 +824,14 @@ func runJogEnvStdin(t *testing.T, dir string, extraEnv []string, stdin string, a
 	cmd := exec.Command(jogBin, args...)
 	cmd.Dir = dir
 	cmd.Stdin = strings.NewReader(stdin)
+	// extraEnv comes last so a test can override the hermetic defaults
+	// (exec.Cmd keeps the last value for duplicate keys) — CI=1 mirrors
+	// runJogStdin, see there.
 	cmd.Env = append(append(os.Environ(),
 		"GIT_CONFIG_GLOBAL="+os.DevNull, "GIT_CONFIG_SYSTEM="+os.DevNull,
 		"GIT_AUTHOR_NAME=test", "GIT_AUTHOR_EMAIL=test@example.com",
 		"GIT_COMMITTER_NAME=test", "GIT_COMMITTER_EMAIL=test@example.com",
+		"CI=1",
 	), extraEnv...)
 	var so, se bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &so, &se
@@ -1268,6 +1276,96 @@ func TestTrimGone(t *testing.T) {
 	stdout, _, code = runJog(t, tr.Dir, "trim", "--gone")
 	if code != 0 || !strings.Contains(stdout, "dead: branch is gone — chain removed (1 snapshot saved at refs/jog/@trash/dead until the next trim)") {
 		t.Fatalf("--gone: code=%d\n%s", code, stdout)
+	}
+}
+
+// readTrimStamp decodes <gitdir>/jog/autotrim.json — the per-repo
+// auto-trim state file.
+func readTrimStamp(t *testing.T, tr *testrepo.Repo) (trimmedAt time.Time, intervalSecs int64, exists bool) {
+	t.Helper()
+	b, err := os.ReadFile(filepath.Join(tr.GitDir, "jog", "autotrim.json"))
+	if err != nil {
+		return time.Time{}, 0, false
+	}
+	var s struct {
+		TrimmedAt    time.Time `json:"trimmed_at"`
+		IntervalSecs int64     `json:"interval_secs"`
+	}
+	if err := json.Unmarshal(b, &s); err != nil {
+		t.Fatalf("corrupt auto-trim stamp: %v\n%s", err, b)
+	}
+	return s.TrimmedAt, s.IntervalSecs, true
+}
+
+// TestAutoTrim covers the background trim: a git command through jog
+// stamps the per-repo state file and spawns a detached `jog trim` on
+// the jog.autoTrim cadence (daily by default), which enforces the keep
+// window on its own; false disables it; `jog config` pushes a new
+// cadence into the stamp immediately; a manual trim resets the clock.
+func TestAutoTrim(t *testing.T) {
+	tr := testrepo.New(t)
+	tr.Write("a.txt", "real\n")
+	tr.Commit("real history commit")
+	head := tr.Git("rev-parse", "HEAD")
+	now := time.Now()
+	ref := "refs/jog/main"
+	mintSnap(t, tr, ref, "ancient", now.Add(-120*24*time.Hour), head)
+	mintSnap(t, tr, ref, "fresh", now.Add(-time.Hour), head)
+
+	// Under CI (the harness default) nothing spawns and nothing is
+	// stamped — test suites and pipelines must not leak background work.
+	runJogAsGit(t, tr.Dir, "status")
+	if _, _, exists := readTrimStamp(t, tr); exists {
+		t.Fatal("a CI run wrote the auto-trim stamp")
+	}
+
+	// CI cleared: the passthrough stamps the default daily cadence and
+	// spawns a background trim, which drops the 120-day snapshot.
+	if _, stderr, code := runJogEnv(t, tr.Dir, []string{"CI="}, "git", "status"); code != 0 {
+		t.Fatalf("passthrough: code=%d\n%s", code, stderr)
+	}
+	stampedAt, secs, exists := readTrimStamp(t, tr)
+	if !exists {
+		t.Fatal("no auto-trim stamp after the passthrough")
+	}
+	if secs != 86400 {
+		t.Errorf("stamp interval = %d, want 86400 (default daily)", secs)
+	}
+	deadline := time.Now().Add(15 * time.Second)
+	for {
+		if out, err := tr.TryGit("log", "--format=%s", ref); err == nil && !strings.Contains(out, "manual: ancient") {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("background trim never dropped the ancient snapshot:\n%s", tr.Git("log", "--format=%s", ref))
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	tr.Git("rev-parse", "refs/jog/@trash/main") // the insurance ref proves it was a real trim
+
+	// A manual trim resets the clock: the stamp advances past the spawn's.
+	runJog(t, tr.Dir, "trim")
+	if trimmedAt, _, _ := readTrimStamp(t, tr); !trimmedAt.After(stampedAt) {
+		t.Errorf("manual trim did not advance the stamp: %v -> %v", stampedAt, trimmedAt)
+	}
+
+	// autoTrim false: the passthrough stamps the disabled marker and
+	// spawns nothing.
+	tr2 := testrepo.New(t)
+	tr2.Write("b.txt", "x\n")
+	tr2.Commit("base")
+	tr2.Git("config", "jog.autoTrim", "false")
+	runJogEnv(t, tr2.Dir, []string{"CI="}, "git", "status")
+	if _, secs, exists := readTrimStamp(t, tr2); !exists || secs != -1 {
+		t.Errorf("disabled stamp = (%d, %v), want (-1, true)", secs, exists)
+	}
+
+	// `jog config` pushes a cadence change into the stamp immediately.
+	if _, stderr, code := runJog(t, tr2.Dir, "config", "autoTrim", "3600"); code != 0 {
+		t.Fatalf("config autoTrim: code=%d\n%s", code, stderr)
+	}
+	if _, secs, _ := readTrimStamp(t, tr2); secs != 3600 {
+		t.Errorf("synced stamp interval = %d, want 3600", secs)
 	}
 }
 

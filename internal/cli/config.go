@@ -55,6 +55,14 @@ var configOptions = []configOption{
 			"default). Suffixes work: 500M, 2G.",
 	},
 	{
+		key: "jog.autoTrim", def: "1.day", kind: "check",
+		desc: "How often a background `jog trim` runs, per repo — it rides a git\n" +
+			"command at most this often, enforcing keep and maxSize on its own.\n" +
+			"Takes git expiry syntax (12.hours, 2.weeks), a number of seconds\n" +
+			"(3600), or a bool: true means the default daily, false means trim\n" +
+			"only runs when you run it.",
+	},
+	{
 		key: "jog.updateCheck", def: "1.day", kind: "check",
 		desc: "How often jog looks for new releases in the background. Takes git\n" +
 			"expiry syntax (12.hours, 2.weeks), a number of seconds (3600), or a\n" +
@@ -128,7 +136,7 @@ func Config(args []string) int {
 			fmt.Fprintf(os.Stderr, "jog: %s\n", out)
 			return 1
 		}
-		syncUpdateCheck(opt)
+		syncCadence(opt)
 		if v, gerr := gitConfig("--get", opt.key); gerr == nil {
 			fmt.Printf("%s unset here — %s still applies from a wider scope\n", opt.name(), v)
 			return 0
@@ -152,7 +160,7 @@ func Config(args []string) int {
 			fmt.Fprintf(os.Stderr, "jog: %s\n", out)
 			return 1
 		}
-		syncUpdateCheck(opt)
+		syncCadence(opt)
 		where := "this repo"
 		if global {
 			where = "every repo"
@@ -231,13 +239,15 @@ func validateValue(opt configOption, value string) error {
 	return nil
 }
 
-// syncUpdateCheck pushes a changed check cadence into the update cache
-// right away — the hot path decides staleness from the cached value, so
-// without this a new cadence would only apply after the next check
-// under the old one.
-func syncUpdateCheck(opt configOption) {
-	if opt.key == "jog.updateCheck" {
+// syncCadence pushes a changed cadence into its state file right away —
+// the hot paths decide staleness from the cached value, so without this
+// a new cadence would only apply after the next run under the old one.
+func syncCadence(opt configOption) {
+	switch opt.key {
+	case "jog.updateCheck":
 		selfupdate.SyncInterval()
+	case "jog.autoTrim":
+		syncTrimInterval()
 	}
 }
 

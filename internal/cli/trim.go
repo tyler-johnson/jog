@@ -18,8 +18,10 @@ import (
 // Trim is `jog trim [--dry-run]`: drop snapshots older than the keep
 // window (default 90 days) from every chain. The only jog command that
 // discards data, so it is layered in seams — list, plan, apply — with a
-// dry-run, a one-deep insurance ref, and CAS-guarded writes. Manual-only:
-// nothing schedules it (plan D19).
+// dry-run, a one-deep insurance ref, and CAS-guarded writes. Runs by
+// hand, and in the background on the jog.autoTrim cadence (autotrim.go)
+// — which is just this command, detached, so both paths share every
+// safety seam.
 //
 // The rewrite (plan D17): survivors are re-committed with tree, dates, and
 // message verbatim; parent 1 relinks to the previous survivor; parent 2
@@ -52,10 +54,15 @@ func Trim(args []string) int {
 		return 1
 	}
 
-	// A command boundary like any other: the tree you trim from is on the
-	// timeline first (and, being brand new, sits far inside the keep
-	// window — untouchable).
 	if !dry {
+		// Any completed run resets the auto-trim clock — a manual trim
+		// buys the repo a full quiet interval. Deferred so per-chain
+		// errors still count as a run (they would repeat on the cadence,
+		// not per command).
+		defer stampTrim(repo)
+		// A command boundary like any other: the tree you trim from is on
+		// the timeline first (and, being brand new, sits far inside the
+		// keep window — untouchable).
 		if _, err := snap.Take(repo, provenance.Pre(strings.TrimSpace("jog trim "+strings.Join(args, " ")))); err != nil {
 			fmt.Fprintf(os.Stderr, "jog: pre-trim snapshot failed: %v\n", err)
 		}

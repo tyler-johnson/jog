@@ -233,6 +233,19 @@ func (d *doctor) checkDisk(repo *gitx.Repo, refLines string) {
 	default:
 		d.info("trim", "nothing to drop — every snapshot is inside the keep window")
 	}
+
+	// The live setting, not the cached stamp: doctor is where a hand-set
+	// config value should read back truthfully right away.
+	iv, enabled := configTrimInterval(repo)
+	s := loadTrimState(repo)
+	switch {
+	case !enabled:
+		d.info("auto-trim", "off (the autoTrim setting) — trim runs only by hand")
+	case s.TrimmedAt.IsZero():
+		d.info("auto-trim", fmt.Sprintf("on — a background trim rides a git command at most every %s", humanDur(iv)))
+	default:
+		d.info("auto-trim", fmt.Sprintf("last ran %s (at most every %s)", humanAge(time.Since(s.TrimmedAt)), humanDur(iv)))
+	}
 }
 
 func plural(n int, word string) string {

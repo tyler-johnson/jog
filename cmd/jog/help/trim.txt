@@ -11,8 +11,13 @@ whole — deleted branches' timelines eventually vanish on their own, and
 drops oldest snapshots beyond a total disk budget; the budget is one
 snapshot lenient — the snapshot that crosses it survives — so even a
 tiny maxSize leaves the newest snapshot. This is the only jog command
-that discards snapshots, and it never runs on its own. The pre-trim
-state survives at refs/jog/@trash/<branch> until the trim after next.
+that discards snapshots. The pre-trim state survives at
+refs/jog/@trash/<branch> until the trim after next.
+
+Trim also runs itself: a background trim rides a git command at most
+daily, per repo, so the keep window enforces itself. "jog config
+autoTrim 2.weeks" changes the cadence; false turns it off, leaving
+trim entirely by hand.
 
 options:
   -n, --dry-run   print the plan, touch nothing
