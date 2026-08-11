@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -12,7 +13,8 @@ import (
 )
 
 // testCacheDir points os.UserCacheDir at a scratch directory for the
-// duration of the test, per-OS.
+// duration of the test, per-OS, and blinds git config so the machine's
+// real jog.* settings can't leak into config-reading paths.
 func testCacheDir(t *testing.T) {
 	t.Helper()
 	dir := t.TempDir()
@@ -24,6 +26,8 @@ func testCacheDir(t *testing.T) {
 	default:
 		t.Setenv("XDG_CACHE_HOME", dir)
 	}
+	t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
+	t.Setenv("GIT_CONFIG_SYSTEM", os.DevNull)
 }
 
 func TestStateRoundTrip(t *testing.T) {
@@ -32,17 +36,19 @@ func TestStateRoundTrip(t *testing.T) {
 		t.Errorf("empty cache should load the zero state, got %+v", s)
 	}
 	want := checkState{
-		CheckedAt:   time.Date(2026, 8, 1, 3, 0, 0, 0, time.UTC),
-		Latest:      "v1.5.0",
-		Notified:    "v1.4.0",
-		AutoTriedAt: time.Date(2026, 8, 2, 9, 0, 0, 0, time.UTC),
+		CheckedAt:    time.Date(2026, 8, 1, 3, 0, 0, 0, time.UTC),
+		Latest:       "v1.5.0",
+		Notified:     "v1.4.0",
+		AutoTriedAt:  time.Date(2026, 8, 2, 9, 0, 0, 0, time.UTC),
+		IntervalSecs: 7 * 24 * 3600,
 	}
 	if err := saveState(want); err != nil {
 		t.Fatal(err)
 	}
 	got := loadState()
 	if !got.CheckedAt.Equal(want.CheckedAt) || got.Latest != want.Latest ||
-		got.Notified != want.Notified || !got.AutoTriedAt.Equal(want.AutoTriedAt) {
+		got.Notified != want.Notified || !got.AutoTriedAt.Equal(want.AutoTriedAt) ||
+		got.IntervalSecs != want.IntervalSecs {
 		t.Errorf("round trip: got %+v want %+v", got, want)
 	}
 
@@ -77,12 +83,67 @@ func TestNeedsCheck(t *testing.T) {
 	}{
 		{"never checked", checkState{}, true},
 		{"fresh", checkState{CheckedAt: now.Add(-time.Hour)}, false},
-		{"six days", checkState{CheckedAt: now.Add(-6 * 24 * time.Hour)}, false},
-		{"eight days", checkState{CheckedAt: now.Add(-8 * 24 * time.Hour)}, true},
+		{"twenty hours", checkState{CheckedAt: now.Add(-20 * time.Hour)}, false},
+		{"two days", checkState{CheckedAt: now.Add(-2 * 24 * time.Hour)}, true},
+		{"weekly cadence, two days", checkState{CheckedAt: now.Add(-2 * 24 * time.Hour), IntervalSecs: 7 * 24 * 3600}, false},
+		{"weekly cadence, eight days", checkState{CheckedAt: now.Add(-8 * 24 * time.Hour), IntervalSecs: 7 * 24 * 3600}, true},
+		{"disabled, fresh", checkState{CheckedAt: now.Add(-time.Hour), IntervalSecs: -1}, false},
+		// Disabled re-verifies the config on the default cadence, so a
+		// re-enable is noticed within a day.
+		{"disabled, two days", checkState{CheckedAt: now.Add(-2 * 24 * time.Hour), IntervalSecs: -1}, true},
 	} {
 		if got := needsCheck(tt.s, now); got != tt.want {
 			t.Errorf("%s: needsCheck = %v, want %v", tt.name, got, tt.want)
 		}
+	}
+}
+
+func TestConfigCheckInterval(t *testing.T) {
+	testCacheDir(t)
+	cfg := filepath.Join(t.TempDir(), "gitconfig")
+	t.Setenv("GIT_CONFIG_GLOBAL", cfg)
+	set := func(v string) {
+		t.Helper()
+		if err := exec.Command("git", "config", "--file", cfg, "jog.updateCheck", v).Run(); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if iv, enabled := configCheckInterval(); !enabled || iv != defaultCheckInterval {
+		t.Errorf("unset: got (%v, %v), want default daily", iv, enabled)
+	}
+	set("true")
+	if iv, enabled := configCheckInterval(); !enabled || iv != defaultCheckInterval {
+		t.Errorf("true: got (%v, %v), want default daily", iv, enabled)
+	}
+	for _, off := range []string{"false", "never", "off"} {
+		set(off)
+		if _, enabled := configCheckInterval(); enabled {
+			t.Errorf("%s: still enabled", off)
+		}
+	}
+	set("2.weeks")
+	if iv, enabled := configCheckInterval(); !enabled || iv < 13*24*time.Hour || iv > 15*24*time.Hour {
+		t.Errorf("2.weeks: got (%v, %v), want ~14 days", iv, enabled)
+	}
+	// Bare numbers are seconds, never approxidate's idea of a date.
+	set("3600")
+	if iv, enabled := configCheckInterval(); !enabled || iv != time.Hour {
+		t.Errorf("3600: got (%v, %v), want hourly", iv, enabled)
+	}
+	set("30")
+	if iv, enabled := configCheckInterval(); !enabled || iv != minCheckInterval {
+		t.Errorf("30: got (%v, %v), want the floor", iv, enabled)
+	}
+	set("0")
+	if _, enabled := configCheckInterval(); enabled {
+		t.Error("0: still enabled")
+	}
+	// Approxidate reads almost anything as a date; a value that lands at
+	// "now" must floor to the minimum, never a per-command check.
+	set("now")
+	if iv, enabled := configCheckInterval(); !enabled || iv < minCheckInterval {
+		t.Errorf("now: got (%v, %v), want the floor", iv, enabled)
 	}
 }
 

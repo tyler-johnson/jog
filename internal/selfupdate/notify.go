@@ -1,31 +1,39 @@
 package selfupdate
 
 // The automatic update check. jog's users mostly never touch the binary
-// after setup — it runs behind the git alias and hooks — so the notice
-// that a release exists rides the passthrough: a detached background
-// `jog update --check` refreshes a small cache file at most weekly, and
-// when the cache says a newer release exists, one line prints after the
-// user's git command, once per release, ever. With jog.autoUpdate on,
-// the notice becomes an act: a detached `jog update` installs the
-// release instead, and the next invocation simply runs it. The hot path
-// never touches the network — deciding whether anything is pending is
-// one file read.
+// after setup — it runs behind the git alias and hooks — so updating
+// rides the passthrough: a detached background `jog update --check`
+// refreshes a small cache file on the jog.updateCheck cadence (daily by
+// default), and when the cache says a
+// newer release exists, a detached `jog update` installs it — the next
+// invocation simply runs the new release. With jog.autoUpdate off, the
+// install becomes a notice: one line after the user's git command, once
+// per release, ever. The hot path never touches the network — deciding
+// whether anything is pending is one file read.
 
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
 	"golang.org/x/term"
 )
 
-// checkInterval is how long a completed check (successful or not)
-// silences the background refresh.
-const checkInterval = 7 * 24 * time.Hour
+// defaultCheckInterval is how long a completed check (successful or
+// not) silences the background refresh when jog.updateCheck doesn't
+// name a cadence of its own.
+const defaultCheckInterval = 24 * time.Hour
+
+// minCheckInterval floors a configured cadence: git's expiry parser is
+// lenient enough to turn odd values into "now", and a per-command
+// network check must never be what a typo buys.
+const minCheckInterval = time.Minute
 
 // autoInterval throttles auto-update: while a release is pending, the
 // config probe (and any install it launches) runs at most daily, so a
@@ -42,6 +50,21 @@ type checkState struct {
 	Latest      string    `json:"latest,omitempty"`
 	Notified    string    `json:"notified,omitempty"`
 	AutoTriedAt time.Time `json:"auto_tried_at,omitzero"`
+	// IntervalSecs caches jog.updateCheck so the hot path decides
+	// staleness from the state file alone: 0 = unset (default cadence),
+	// -1 = checking disabled. Refreshed whenever the config is actually
+	// read, and by `jog config` on a set.
+	IntervalSecs int64 `json:"interval_secs,omitempty"`
+}
+
+// interval is the cached check cadence. Disabled still returns the
+// default: that is how often the config is re-read to notice a
+// re-enable.
+func (s checkState) interval() time.Duration {
+	if s.IntervalSecs > 0 {
+		return time.Duration(s.IntervalSecs) * time.Second
+	}
+	return defaultCheckInterval
 }
 
 // statePath is <user cache dir>/jog/update.json — XDG_CACHE_HOME or
@@ -107,9 +130,11 @@ func saveState(s checkState) error {
 	return nil
 }
 
-// needsCheck reports whether the cache is stale enough to refresh.
+// needsCheck reports whether the cache is stale enough to refresh,
+// judged by the cached cadence — the live config is only consulted once
+// this says yes.
 func needsCheck(s checkState, now time.Time) bool {
-	return now.Sub(s.CheckedAt) >= checkInterval
+	return now.Sub(s.CheckedAt) >= s.interval()
 }
 
 // gatesOpen is the cheap half of the enablement check: source builds
@@ -119,27 +144,84 @@ func gatesOpen(version string) bool {
 	return releaseVersion.MatchString(version) && os.Getenv("CI") == ""
 }
 
-// configEnabled is the expensive half — one git spawn — so callers only
-// reach it when the cache is stale or an update is pending; the common
-// case pays nothing. Unset defaults to on.
-func configEnabled() bool {
-	out, err := exec.Command("git", "config", "--type=bool", "--get", "jog.updateCheck").Output()
+// configCheckInterval is the expensive half — a git spawn or two — so
+// callers only reach it when the cache is stale or an update is
+// pending; the common case pays nothing. jog.updateCheck holds a bool
+// (true = default cadence, false = off), a number of seconds (3600 =
+// hourly, 0 = off), or a git expiry duration ("12.hours", "2.weeks",
+// "never" = off). Unset defaults to daily. The raw value is inspected
+// before git's expiry parser sees it: approxidate happily reads "false"
+// as a date.
+func configCheckInterval() (time.Duration, bool) {
+	raw, err := exec.Command("git", "config", "--get", "jog.updateCheck").Output()
 	if err != nil {
-		return true
+		return defaultCheckInterval, true
 	}
-	return strings.TrimSpace(string(out)) != "false"
+	val := strings.ToLower(strings.TrimSpace(string(raw)))
+	switch val {
+	case "false", "no", "off", "never":
+		return 0, false
+	case "true", "yes", "on", "":
+		return defaultCheckInterval, true
+	}
+	// A bare number is seconds (3600 = hourly). The expiry parser must
+	// not see these: approxidate reads them as dates — "3600" is now,
+	// "7" is the 7th of this month.
+	if secs, err := strconv.ParseUint(val, 10, 63); err == nil {
+		if secs == 0 {
+			return 0, false
+		}
+		return max(time.Duration(secs)*time.Second, minCheckInterval), true
+	}
+	out, err := exec.Command("git", "config", "--type=expiry-date", "--get", "jog.updateCheck").Output()
+	if err != nil {
+		return defaultCheckInterval, true
+	}
+	epoch, err := strconv.ParseUint(strings.TrimSpace(string(out)), 10, 64)
+	switch {
+	case err != nil:
+		return defaultCheckInterval, true
+	case epoch == 0:
+		// Expiry-speak for "never expire" — never check.
+		return 0, false
+	case epoch > math.MaxInt64:
+		// Expiry-speak for "expire everything" ("now", "all") — the
+		// shortest cadence there is.
+		return minCheckInterval, true
+	}
+	return max(time.Since(time.Unix(int64(epoch), 0)), minCheckInterval), true
+}
+
+// intervalSecs is the state-file encoding of configCheckInterval's
+// answer.
+func intervalSecs(iv time.Duration, enabled bool) int64 {
+	if !enabled {
+		return -1
+	}
+	return int64(iv / time.Second)
+}
+
+// SyncInterval re-reads jog.updateCheck into the cache. `jog config`
+// calls this after changing the setting so a new cadence (or a
+// re-enable) applies now, not at the next check under the old one.
+func SyncInterval() {
+	s := loadState()
+	iv, enabled := configCheckInterval()
+	s.IntervalSecs = intervalSecs(iv, enabled)
+	saveState(s)
 }
 
 // configAutoUpdate reports whether jog.autoUpdate is on: install new
 // releases in the background instead of printing the notice. Unset
-// defaults to off. Like configEnabled, one git spawn, reached only
-// while an update is pending.
+// defaults to on — setting it to false is how you opt into notices.
+// Like configEnabled, one git spawn, reached only while an update is
+// pending.
 func configAutoUpdate() bool {
 	out, err := exec.Command("git", "config", "--type=bool", "--get", "jog.autoUpdate").Output()
 	if err != nil {
-		return false
+		return true
 	}
-	return strings.TrimSpace(string(out)) == "true"
+	return strings.TrimSpace(string(out)) != "false"
 }
 
 // MaybeSpawnCheck starts a detached `jog update --check` when the cache
@@ -150,10 +232,27 @@ func MaybeSpawnCheck(version string) {
 	if !gatesOpen(version) {
 		return
 	}
-	if !needsCheck(loadState(), time.Now()) {
+	s := loadState()
+	now := time.Now()
+	if !needsCheck(s, now) {
 		return
 	}
-	if !configEnabled() {
+	// The cached cadence says a check is due — now the config gets its
+	// say, and whatever it says is cached so the next command is back to
+	// one file read.
+	iv, enabled := configCheckInterval()
+	s.IntervalSecs = intervalSecs(iv, enabled)
+	if !enabled {
+		// Disabled: stamp CheckedAt so this config re-read itself runs at
+		// most on the default cadence.
+		s.CheckedAt = now
+		saveState(s)
+		return
+	}
+	if now.Sub(s.CheckedAt) < iv {
+		// The live cadence is longer than the cached one — not due after
+		// all.
+		saveState(s)
 		return
 	}
 	exe, err := os.Executable()
@@ -173,6 +272,8 @@ func MaybeSpawnCheck(version string) {
 func (u *Updater) RefreshCache() {
 	s := loadState()
 	s.CheckedAt = time.Now()
+	iv, enabled := configCheckInterval()
+	s.IntervalSecs = intervalSecs(iv, enabled)
 	saveState(s)
 	rel, err := u.latest()
 	if err != nil || !releaseVersion.MatchString(rel.TagName) {
@@ -206,7 +307,7 @@ func Pending(version string) string {
 	if notice == "" && !probe {
 		return ""
 	}
-	if !configEnabled() {
+	if _, enabled := configCheckInterval(); !enabled {
 		return ""
 	}
 	if probe {

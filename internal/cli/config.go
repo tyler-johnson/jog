@@ -6,6 +6,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"github.com/tyler-johnson/jog/internal/selfupdate"
 )
 
 // Config is `jog config` — jog's settings, all of them, in one place.
@@ -22,7 +24,7 @@ import (
 type configOption struct {
 	key  string // full git config key
 	def  string // raw default value, as git would print it
-	kind string // "int" (git int, k/m/g suffixes ok), "expiry" (git expiry syntax), or "bool"
+	kind string // "int" (git int, k/m/g suffixes ok), "expiry" (git expiry syntax), "bool", or "check" (expiry or bool)
 	desc string // pre-wrapped description lines
 }
 
@@ -52,18 +54,19 @@ var configOptions = []configOption{
 			"default). Suffixes work: 500M, 2G.",
 	},
 	{
-		key: "jog.updateCheck", def: "true", kind: "bool",
-		desc: "Whether jog looks for new releases: a background check at most\n" +
-			"weekly, and a one-line notice after a git command, at most once per\n" +
-			"release. false turns the checks and the notices off entirely —\n" +
-			"including autoUpdate.",
+		key: "jog.updateCheck", def: "1.day", kind: "check",
+		desc: "How often jog looks for new releases in the background. Takes git\n" +
+			"expiry syntax (12.hours, 2.weeks), a number of seconds (3600), or a\n" +
+			"bool: true means the default daily, false turns checking off\n" +
+			"entirely — no updates, no notices, regardless of autoUpdate.",
 	},
 	{
-		key: "jog.autoUpdate", def: "false", kind: "bool",
-		desc: "Install new releases automatically: instead of printing the notice,\n" +
-			"jog updates itself in the background — the running command finishes\n" +
-			"on the old version, the next one runs the new. Homebrew and source\n" +
-			"installs keep the notice (their package manager owns the binary).",
+		key: "jog.autoUpdate", def: "true", kind: "bool",
+		desc: "Install new releases automatically in the background — the running\n" +
+			"command finishes on the old version, the next one runs the new.\n" +
+			"false prints a one-line notice after a git command instead, once\n" +
+			"per release. Homebrew and source installs always get the notice\n" +
+			"(their package manager owns the binary).",
 	},
 }
 
@@ -124,6 +127,7 @@ func Config(args []string) int {
 			fmt.Fprintf(os.Stderr, "jog: %s\n", out)
 			return 1
 		}
+		syncUpdateCheck(opt)
 		if v, gerr := gitConfig("--get", opt.key); gerr == nil {
 			fmt.Printf("%s unset here — %s still applies from a wider scope\n", opt.name(), v)
 			return 0
@@ -147,6 +151,7 @@ func Config(args []string) int {
 			fmt.Fprintf(os.Stderr, "jog: %s\n", out)
 			return 1
 		}
+		syncUpdateCheck(opt)
 		where := "this repo"
 		if global {
 			where = "every repo"
@@ -210,11 +215,29 @@ func validateValue(opt configOption, value string) error {
 	case "bool":
 		typeFlag = "--type=bool"
 		example = "true or false"
+	case "check":
+		// Either a bool or an expiry duration: whichever git parser
+		// accepts it wins.
+		if _, err := gitConfig("--file", f, "--type=bool", "--get", opt.key); err == nil {
+			return nil
+		}
+		typeFlag = "--type=expiry-date"
+		example = "an interval like 12.hours, 2.weeks, or seconds (3600), or a bool"
 	}
 	if _, err := gitConfig("--file", f, typeFlag, "--get", opt.key); err != nil {
 		return fmt.Errorf("%q is not a valid value for %s (want %s)", value, opt.name(), example)
 	}
 	return nil
+}
+
+// syncUpdateCheck pushes a changed check cadence into the update cache
+// right away — the hot path decides staleness from the cached value, so
+// without this a new cadence would only apply after the next check
+// under the old one.
+func syncUpdateCheck(opt configOption) {
+	if opt.key == "jog.updateCheck" {
+		selfupdate.SyncInterval()
+	}
 }
 
 // gitConfig shells out to real `git config` with the given arguments.

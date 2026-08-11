@@ -37,17 +37,17 @@ restored to c0ffee1 (2 minutes ago — pre: git status): 14 restored, 0 deleted
 
 ## Why jog
 
-Git protects your commits, but it has never protected your working
-tree. Losing uncommitted work to a wrong command was always a human
-hazard, and now coding agents have made it common.
+_**Think of jog as an insurance policy for your working tree: invisible until you need it,
+invaluable when you do.**_
 
-Inspired by [jj], jog snapshots the tree before every git command, agent
-tool call, and editor save, running silently inside the workflow you
-already have.
+Inspired largely by [jj], jog is a snapshotting tool for uncommitted changes in
+Git working trees. It's designed to run silently inside the workflow you already
+have, capturing changes as they happen. With this, any mistake against the
+working tree becomes instantly reversible.
 
-It's an insurance policy for your code: invisible until you need it,
-invaluable when you do. Every mistake against the working tree becomes
-reversible.
+Git protects your commits, but it has never protected your working tree. Losing
+uncommitted work to a wrong command is never fun, and now coding agents have
+made it commonplace.
 
 [jj]: https://github.com/jj-vcs/jj
 
@@ -77,14 +77,8 @@ reversible.
 **1. Install the binary:**
 
 ```sh
-# install script (linux / macOS) — verifies checksums, lands in ~/.local/bin
+# linux / macOS — verifies checksums, lands in ~/.local/bin
 curl -fsSL https://raw.githubusercontent.com/tyler-johnson/jog/main/install.sh | sh
-
-# Homebrew (macOS / Linux)
-brew install tyler-johnson/tap/jog
-
-# or with Go 1.26+
-go install github.com/tyler-johnson/jog/cmd/jog@latest
 ```
 
 ```powershell
@@ -92,13 +86,27 @@ go install github.com/tyler-johnson/jog/cmd/jog@latest
 irm https://raw.githubusercontent.com/tyler-johnson/jog/main/install.ps1 | iex
 ```
 
+Script installs **keep themselves up to date**: jog checks for new
+releases daily in the background and installs them silently — install
+once and forget it. `jog config autoUpdate false` prints a one-line
+notice instead of installing, and `jog config updateCheck false` opts
+out of all of it.
+
+Other ways to install:
+
+```sh
+# Homebrew (macOS / Linux)
+brew install tyler-johnson/tap/jog
+
+# or with Go 1.26+
+go install github.com/tyler-johnson/jog/cmd/jog@latest
+```
+
 Prebuilt binaries for linux/darwin/windows (amd64/arm64) are on the
-[releases page](https://github.com/tyler-johnson/jog/releases). Script
-installs update themselves later with `jog update` (brew and go installs
-keep their own upgrade commands, and `jog update` says which). jog also
-checks weekly in the background and mentions a new release once, after a
-git command; `jog config autoUpdate true` installs it silently instead,
-and `jog config updateCheck false` opts out of all of it.
+[releases page](https://github.com/tyler-johnson/jog/releases). Brew and
+go installs update through their own tools (`brew upgrade jog` /
+`go install …@latest`) — jog prints a one-line notice when a new release
+exists and says which command applies.
 
 **2. Wire it up:**
 
@@ -393,8 +401,8 @@ validated through git's own parsers:
 | `jog.maxFileSize` | `50m` | skip new files larger than this (`0` disables the guard) |
 | `jog.keep` | `90.days` | `jog trim` drops snapshots older than this (`never` keeps everything) |
 | `jog.maxSize` | `0` (off) | total disk budget for snapshots — `jog trim` drops oldest first until the estimate fits (one snapshot lenient) |
-| `jog.updateCheck` | `true` | weekly background release check, plus a one-line notice once per release after a git command (`false` disables both, and `autoUpdate` with them) |
-| `jog.autoUpdate` | `false` | install new releases in the background instead of printing the notice; the next command runs the new version (brew and source installs keep the notice) |
+| `jog.updateCheck` | `1.day` | how often the background release check runs — git expiry syntax (`12.hours`, `2.weeks`), seconds (`3600`), or a bool (`false` disables updates and notices entirely, regardless of `autoUpdate`) |
+| `jog.autoUpdate` | `true` | install new releases in the background; the next command runs the new version (`false` prints a one-line notice once per release instead; brew and source installs always get the notice) |
 | `gc.refs/jog/*.reflogExpire` | `never` | set by jog on first snapshot; keeps gc off jog's reflogs |
 | `gc.refs/jog/*.reflogExpireUnreachable` | `never` | same |
 

@@ -339,14 +339,14 @@ replaces the running executable in place. Prints "already up to date"
 when there is nothing newer. Nothing else changes — settings, hooks,
 and snapshots are untouched by an update.
 
-jog also checks on its own: at most weekly, a background
-` + "`jog update --check`" + ` refreshes a small cache in your user cache
-directory, and when it finds a newer release, one line prints after a
-git command — once per release, only on a terminal, never from hooks.
-` + "`jog config autoUpdate true`" + ` goes one further: no notice — jog
-installs the release in the background and your next command runs it.
-` + "`jog config updateCheck false`" + ` turns all of it off.
---check only rewrites the cache; it never installs anything.
+jog also updates on its own: a background ` + "`jog update --check`" + `
+refreshes a small cache on the updateCheck cadence — daily by default,
+` + "`jog config updateCheck 2.weeks`" + ` to change it — and when it finds
+a newer release, jog installs it in the background; your next command
+runs the new version. ` + "`jog config autoUpdate false`" + ` prints a
+one-line notice instead — once per release, only on a terminal, never
+from hooks — and ` + "`jog config updateCheck false`" + ` turns all of it
+off. --check only rewrites the cache; it never installs anything.
 
 Installs that belong to another tool are recognized and left alone:
 a jog built from source is updated with
