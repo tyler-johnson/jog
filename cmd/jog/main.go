@@ -193,6 +193,14 @@ func run(args []string) int {
 		}
 		fmt.Fprintln(os.Stderr, "jog: editor-hook wants an editor name — it is wired by `jog editors install`, not run by hand")
 		return 0
+	case "shell-hook":
+		// Runtime entry wired by `jog shell install`: exit 0 always, print
+		// nothing — output would land in the terminal ahead of every
+		// command. (A typed command literally equal to --help arrives
+		// after `--`, which wantsHelp stops at, so it snapshots instead of
+		// printing a help page; bare `jog shell-hook --help` still gets
+		// the page above.)
+		return cli.ShellHook(args[1:])
 	case "hooks", "skill", "skills":
 		fmt.Fprintf(os.Stderr, "jog: %q moved — `jog agents install|uninstall|list` manages hooks and skills\n", args[0])
 		return 2

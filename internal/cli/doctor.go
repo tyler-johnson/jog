@@ -257,10 +257,11 @@ func plural(n int, word string) string {
 
 // checkTriggers verifies something is actually invoking the engine: the
 // Claude hooks (deterministic — settings.json either wires `jog hook
-// claude` or it doesn't) and the shell alias (heuristic — an rc-file grep
-// can't see a live shell's aliases, so it is reported, never asserted).
-// Neither wired at all is the real finding: a silent engine feels safe
-// while capturing nothing.
+// claude` or it doesn't) and the shell wiring, alias and preexec hook
+// both (heuristic — an rc-file grep can't see a live shell's aliases or
+// hooks, so hand-written ones are reported, never asserted). Nothing
+// wired at all is the real finding: a silent engine feels safe while
+// capturing nothing.
 func (d *doctor) checkTriggers() {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -350,8 +351,30 @@ func (d *doctor) checkTriggers() {
 		d.info("alias", "no `jog git` alias found in shell rc files (heuristic)")
 	}
 
-	if !hooks && aliasFile == "" {
-		d.warn("triggers", "neither the alias nor agent/editor hooks are wired — snapshots only happen when you run `jog` by hand (`jog install` walks through the setup)")
+	// The preexec hook: same precision split as the alias — jog's marked
+	// line is asserted, a hand-wired `jog shell-hook` line only reported.
+	preexecFile := ""
+	preexecManaged := false
+	for _, s := range shell.Statuses() {
+		if s.PreexecInstalled {
+			preexecFile, preexecManaged = s.RC, true
+			break
+		}
+		if s.PreexecByHand && preexecFile == "" {
+			preexecFile = s.RC
+		}
+	}
+	switch {
+	case preexecManaged:
+		d.ok("preexec", "`jog shell-hook` wired in "+preexecFile+" (`jog shell` manages it)")
+	case preexecFile != "":
+		d.info("preexec", "`jog shell-hook` found in "+preexecFile+" (heuristic — wired by hand)")
+	default:
+		d.info("preexec", "no preexec hook in shell rc files — `jog shell install` adds it (snapshots before every command, not just git)")
+	}
+
+	if !hooks && aliasFile == "" && preexecFile == "" {
+		d.warn("triggers", "neither the alias, the preexec hook, nor agent/editor hooks are wired — snapshots only happen when you run `jog` by hand (`jog install` walks through the setup)")
 	}
 }
 

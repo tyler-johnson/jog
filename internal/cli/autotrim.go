@@ -103,7 +103,10 @@ func configTrimInterval(repo *gitx.Repo) (time.Duration, bool) {
 
 // maybeSpawnTrim starts a detached `jog trim` in this repo when the
 // stamp is stale and auto-trim is enabled. Called from human-facing
-// commands that already hold a repo — never hooks. The stamp advances
+// commands that already hold a repo — never agent or editor hooks,
+// with one deliberate exception: shell-hook, so a preexec-only setup
+// (no alias, no human-facing jog commands) still maintains itself. The
+// spawn is silent and detached, so the iron rule holds. The stamp advances
 // before the spawn, so a failing trim retries on the cadence, not on
 // every command; concurrent racers are harmless besides (trim's ref
 // writes are CAS-guarded). The child is never waited on and its output

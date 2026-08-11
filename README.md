@@ -106,30 +106,45 @@ exists and says which command applies.
 **2. Wire it up:**
 
 ```sh
-jog install   # guided — asks about the alias, agents, and editors
+jog install   # guided — asks about the shell wiring, agents, and editors
 ```
 
-The alias is how you "remember" to snapshot: you don't. Muscle memory is
-the trigger; the compulsive `git status` tic becomes the snapshot
-heartbeat. `jog install` adds it to your shell's rc file (`jog shell
-install` does just that piece); by hand it's:
+The standard shell install is two marked lines in your rc file. The
+**alias** is how you "remember" to snapshot: you don't — muscle memory
+is the trigger; the compulsive `git status` tic becomes the snapshot
+heartbeat. The **preexec hook** snapshots before *every* interactive
+command, not just git, so `rm -rf`, `sed -i`, and `make clean` are
+covered too. `jog install` adds both (`jog shell install` does just
+that piece, and `--no-alias`/`--no-preexec` scope it); by hand it's:
 
 ```sh
-# bash / zsh (~/.bashrc / ~/.zshrc)
+# bash (~/.bashrc) — preexec via PS0, bash 4.4+ (older bash ignores it harmlessly)
 alias git='jog git'
+PS0='$(command -v jog >/dev/null && jog shell-hook --history -- "$(HISTTIMEFORMAT= builtin history 1)")'"$PS0"
 
-# fish
+# zsh (~/.zshrc)
+alias git='jog git'
+__jog_preexec() { command -v jog >/dev/null && jog shell-hook -- "$1"; }; preexec_functions+=(__jog_preexec)
+
+# fish (~/.config/fish/config.fish)
 alias git 'jog git'
+function __jog_preexec --on-event fish_preexec; type -q jog; and jog shell-hook -- "$argv"; end
 ```
 
 ```powershell
-# PowerShell (add to your profile — `notepad $PROFILE`)
+# PowerShell (add to your profile — `notepad $PROFILE`; no preexec mechanism, alias only)
 function git { jog git @args }
 ```
 
-Scripts, IDEs, and CI are untouched — they resolve `git` on PATH and get real
-git. That's a feature: jog stays out of every code path that expects exact
-git behavior.
+On a git command both fire — the preexec snapshot mints and the alias
+one no-ops. The hook is silent and synchronous (the snapshot exists
+*before* the command runs), skips `jog` commands, and costs one no-op
+jog run per command inside a repo, near-zero outside. Hand-wired lines
+like the above are recognized and left alone by `jog shell`.
+
+Scripts, IDEs, and CI are untouched — they resolve `git` on PATH, get real
+git, and never source an interactive rc file. That's a feature: jog stays
+out of every code path that expects exact git behavior.
 
 The other two surfaces have their own commands too — `jog agents install`
 (hooks + skill for every agent client on this machine) and
@@ -242,8 +257,8 @@ Two disjoint namespaces, one rule: **`jog git` is the only door to git.**
 | `jog trim [--dry-run] [--gone]` | drop snapshots older than `jog.keep` (default 90 days); `--gone` also drops deleted branches' chains; the previous tip stays at `refs/jog/@trash/<branch>` until the next trim |
 | `jog config [key [value]]` | list jog's settings with values and meanings — or get and set them |
 | `jog doctor [--fix]` | verify invariants, wiring, and liveness (`--fix` repairs the gc config) |
-| `jog install [--yes]` | guided setup — the alias, agent hooks, and editor hooks, one question each (`--yes` takes the defaults; `jog uninstall` reverses it) |
-| `jog shell install` | the git alias in your login shell's rc file (`uninstall`, `list`; or name bash, zsh, fish, powershell) |
+| `jog install [--yes]` | guided setup — the shell wiring, agent hooks, and editor hooks (`--yes` takes the defaults; `jog uninstall` reverses it) |
+| `jog shell install` | the git alias + preexec hook in your login shell's rc file (`uninstall`, `list`; `--no-alias`/`--no-preexec` scope it; or name bash, zsh, fish, powershell) |
 | `jog agents install` | hooks + skill for every agent client on this machine (`uninstall`, `list`; `[hooks\|skill]` and client names narrow it; `--project`: this repo) |
 | `jog editors install <name>` | a post-save snapshot hook for one text editor (`uninstall`, `list`) |
 | `jog update` | update jog to the latest release, sha256-verified (script/binary installs; brew and go installs are pointed at their own upgrade command) |
@@ -376,9 +391,18 @@ jog does **not** protect against:
 - **Scripts and CI running real git.** They bypass the alias *by design*.
 - **Ignored files.** Never snapshotted, by design — jog is not a backup
   system for `node_modules` or build artifacts.
-- **Solo terminal work without the alias installed.** No trigger, no snapshot.
+- **Terminal work without the shell wiring installed.** No trigger, no
+  snapshot. The standard `jog shell install` covers every interactive
+  command via the preexec hook (bash ≥ 4.4 for that half; PowerShell gets
+  the alias only), but a shell it was never wired into is unprotected.
 
 Also worth knowing:
+
+- Preexec labels can go stale; content never does. The bash hook labels
+  the snapshot from `history 1`, so with `HISTCONTROL=ignorespace` a
+  space-prefixed command gets the previous command's label — the snapshot
+  itself is still taken causally before the command runs. Re-sourcing an
+  rc file registers the hook twice; the second fire is a no-op.
 
 - `refs/jog/*` stays private through normal `push`/`fetch`/`clone`, but
   **leaks** via `push --mirror`, `clone --mirror`, explicit `refs/*:refs/*`

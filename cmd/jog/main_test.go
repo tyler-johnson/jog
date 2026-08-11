@@ -941,7 +941,7 @@ func TestDoctor(t *testing.T) {
 	tr2.Commit("base")
 	runJog(t, tr2.Dir, "-m", "first")
 	stdout, _, code = runJogEnv(t, tr2.Dir, fakeHome(bare), "doctor")
-	if code != 1 || !strings.Contains(stdout, "neither the alias nor agent/editor hooks") {
+	if code != 1 || !strings.Contains(stdout, "neither the alias, the preexec hook, nor agent/editor hooks") {
 		t.Errorf("no triggers: code=%d\n%s", code, stdout)
 	}
 
@@ -957,6 +957,22 @@ func TestDoctor(t *testing.T) {
 	}
 	if strings.Contains(stdout, "neither the alias") {
 		t.Errorf("managed alias should clear the triggers warning:\n%s", stdout)
+	}
+
+	// A managed preexec line is a trigger in its own right: ok row, and
+	// preexec-only wiring must not raise the no-triggers warning.
+	bare2 := t.TempDir()
+	preexecMarked := `__jog_preexec() { command -v jog >/dev/null && jog shell-hook -- "$1"; }; preexec_functions+=(__jog_preexec)` +
+		" # jog preexec — added by `jog shell install`\n"
+	if err := os.WriteFile(filepath.Join(bare2, ".zshrc"), []byte(preexecMarked), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	stdout, _, code = runJogEnv(t, tr2.Dir, fakeHome(bare2), "doctor")
+	if code != 0 || !strings.Contains(stdout, "`jog shell-hook` wired in ~/.zshrc (`jog shell` manages it)") {
+		t.Errorf("managed preexec: code=%d\n%s", code, stdout)
+	}
+	if strings.Contains(stdout, "neither the alias") {
+		t.Errorf("preexec-only wiring should clear the triggers warning:\n%s", stdout)
 	}
 }
 
@@ -1439,7 +1455,7 @@ func mustHelp(t *testing.T, dir string, words ...string) string {
 // --help) belongs to real git. (TestHelp covers the global forms.)
 func TestPerCommandHelp(t *testing.T) {
 	dir := t.TempDir() // outside any repo: help must not need one
-	verbs := []string{"log", "snaps", "pick", "since", "restore", "back", "trim", "config", "doctor", "hook", "agents", "agent", "editors", "editor", "editor-hook", "update", "shell", "install", "uninstall"}
+	verbs := []string{"log", "snaps", "pick", "since", "restore", "back", "trim", "config", "doctor", "hook", "agents", "agent", "editors", "editor", "editor-hook", "shell-hook", "update", "shell", "install", "uninstall"}
 	for _, v := range verbs {
 		stdout, _, code := runJog(t, dir, v, "--help")
 		if code != 0 || !strings.Contains(stdout, "usage:") || !strings.Contains(stdout, v) {
@@ -2342,32 +2358,64 @@ func loginShellFixture(home string) (name, rc, display, markedLine string) {
 		"alias git='jog git' # jog — added by `jog shell install`"
 }
 
-// TestShell covers `jog shell`: the marked alias line in rc files —
-// login-shell default, forcing by name, hand-added aliases left alone,
-// and surgical uninstall.
+// loginPreexecLine is the marked preexec line `jog shell install`
+// writes for the login shell fixture — "" on Windows, where the login
+// shell is PowerShell and preexec is unsupported.
+func loginPreexecLine() string {
+	if runtime.GOOS == "windows" {
+		return ""
+	}
+	return `__jog_preexec() { command -v jog >/dev/null && jog shell-hook -- "$1"; }; preexec_functions+=(__jog_preexec)` +
+		" # jog preexec — added by `jog shell install`"
+}
+
+// bashPreexecMarked is the marked PS0 line bash gets.
+const bashPreexecMarked = `PS0='$(command -v jog >/dev/null && jog shell-hook --history -- "$(HISTTIMEFORMAT= builtin history 1)")'"$PS0"` +
+	" # jog preexec — added by `jog shell install`"
+
+// TestShell covers `jog shell`: the two marked lines (alias + preexec)
+// in rc files — login-shell default, forcing by name, --no-alias /
+// --no-preexec scoping, hand-added lines left alone, and surgical
+// uninstall.
 func TestShell(t *testing.T) {
 	home := t.TempDir()
 	env := append(fakeHome(home), "SHELL=/bin/zsh")
 	loginName, loginRC, loginDisplay, markedLine := loginShellFixture(home)
+	preexecLine := loginPreexecLine()
 
-	// No names: the login shell is the target; the rc file is created
-	// when missing.
+	// No names: the login shell is the target, the rc file is created
+	// when missing, and BOTH surfaces land. (On Windows the login shell
+	// is PowerShell: the alias installs, preexec reports not supported,
+	// exit stays 0.)
 	stdout, _, code := runJogEnv(t, home, env, "shell", "install")
 	if code != 0 || !strings.Contains(stdout, "installed — "+loginDisplay) {
 		t.Fatalf("shell install: code=%d\n%s", code, stdout)
 	}
-	if b := mustRead(t, loginRC); !strings.Contains(string(b), markedLine) {
-		t.Errorf("login rc missing the marked line:\n%s", b)
+	b := string(mustRead(t, loginRC))
+	if !strings.Contains(b, markedLine) {
+		t.Errorf("login rc missing the marked alias line:\n%s", b)
+	}
+	if preexecLine != "" {
+		if !strings.Contains(b, preexecLine) {
+			t.Errorf("login rc missing the marked preexec line:\n%s", b)
+		}
+	} else if !strings.Contains(stdout, "not supported") {
+		t.Errorf("powershell preexec should say not supported:\n%s", stdout)
 	}
 
-	// Idempotent.
+	// Idempotent — per surface.
 	stdout, _, code = runJogEnv(t, home, env, "shell", "install")
 	if code != 0 || !strings.Contains(stdout, "already installed") {
 		t.Errorf("re-install: code=%d\n%s", code, stdout)
 	}
 
+	// Opting out of both surfaces is a usage error.
+	if _, stderr, code := runJogEnv(t, home, env, "shell", "install", "--no-alias", "--no-preexec"); code != 2 || !strings.Contains(stderr, "usage") {
+		t.Errorf("both flags: code=%d %q", code, stderr)
+	}
+
 	// Named shells force, whatever the login shell is; existing content
-	// is preserved, and fish gets its own spelling under ~/.config.
+	// is preserved, and fish gets its own spellings under ~/.config.
 	const bashMarked = "alias git='jog git' # jog — added by `jog shell install`"
 	bashrc := filepath.Join(home, ".bashrc")
 	if err := os.WriteFile(bashrc, []byte("export FOO=1\n"), 0o644); err != nil {
@@ -2377,22 +2425,42 @@ func TestShell(t *testing.T) {
 	if code != 0 || !strings.Contains(stdout, ".bashrc") || !strings.Contains(stdout, "config.fish") {
 		t.Fatalf("forced install: code=%d\n%s", code, stdout)
 	}
-	if b := string(mustRead(t, bashrc)); !strings.HasPrefix(b, "export FOO=1\n") || !strings.Contains(b, bashMarked) {
+	if b := string(mustRead(t, bashrc)); !strings.HasPrefix(b, "export FOO=1\n") ||
+		!strings.Contains(b, bashMarked) || !strings.Contains(b, bashPreexecMarked) {
 		t.Errorf(".bashrc content wrong:\n%s", b)
 	}
 	fishrc := filepath.Join(home, ".config", "fish", "config.fish")
-	if b := string(mustRead(t, fishrc)); !strings.Contains(b, "alias git 'jog git'") {
-		t.Errorf("config.fish missing the fish spelling:\n%s", b)
+	if b := string(mustRead(t, fishrc)); !strings.Contains(b, "alias git 'jog git'") ||
+		!strings.Contains(b, "--on-event fish_preexec") {
+		t.Errorf("config.fish missing the fish spellings:\n%s", b)
 	}
 
-	// list shows what's wired.
+	// list shows both surfaces.
 	stdout, _, code = runJogEnv(t, home, env, "shell", "list")
-	if code != 0 || !strings.Contains(stdout, loginDisplay) || !strings.Contains(stdout, "installed") {
+	if code != 0 || !strings.Contains(stdout, loginDisplay) || !strings.Contains(stdout, "installed") ||
+		!strings.Contains(stdout, "preexec") {
 		t.Errorf("list: code=%d\n%s", code, stdout)
 	}
 
-	// Bare uninstall sweeps every rc file carrying the marker — and only
-	// the marker line goes.
+	// --no-alias scopes uninstall to the preexec line; the alias line
+	// survives byte-identical, and the scoped reinstall never duplicates.
+	stdout, _, code = runJogEnv(t, home, env, "shell", "uninstall", "--no-alias", "bash")
+	if code != 0 || !strings.Contains(stdout, "removed the preexec hook") {
+		t.Fatalf("scoped uninstall: code=%d\n%s", code, stdout)
+	}
+	if b := string(mustRead(t, bashrc)); !strings.Contains(b, bashMarked) || strings.Contains(b, "jog shell-hook") {
+		t.Errorf("scoped uninstall touched the alias:\n%s", b)
+	}
+	stdout, _, code = runJogEnv(t, home, env, "shell", "install", "--no-alias", "bash")
+	if code != 0 || !strings.Contains(stdout, "installed — ") {
+		t.Fatalf("scoped reinstall: code=%d\n%s", code, stdout)
+	}
+	if b := string(mustRead(t, bashrc)); strings.Count(b, bashMarked) != 1 || strings.Count(b, bashPreexecMarked) != 1 {
+		t.Errorf("scoped reinstall duplicated a line:\n%s", b)
+	}
+
+	// Bare uninstall sweeps every rc file carrying either marker — and
+	// only the marked lines go.
 	stdout, _, code = runJogEnv(t, home, env, "shell", "uninstall")
 	if code != 0 || !strings.Contains(stdout, "removed the alias") {
 		t.Fatalf("uninstall: code=%d\n%s", code, stdout)
@@ -2401,9 +2469,22 @@ func TestShell(t *testing.T) {
 		t.Errorf(".bashrc not restored: %q", b)
 	}
 	for _, rc := range []string{loginRC, fishrc} {
-		if b, err := os.ReadFile(rc); err == nil && strings.Contains(string(b), "jog git") {
-			t.Errorf("%s still has the alias:\n%s", rc, b)
+		if b, err := os.ReadFile(rc); err == nil &&
+			(strings.Contains(string(b), "jog git") || strings.Contains(string(b), "jog shell-hook")) {
+			t.Errorf("%s still has jog lines:\n%s", rc, b)
 		}
+	}
+
+	// PowerShell by name: the alias wires; the preexec row reports not
+	// supported and the exit code stays 0.
+	stdout, _, code = runJogEnv(t, home, env, "shell", "install", "powershell")
+	if code != 0 || !strings.Contains(stdout, "not supported") || !strings.Contains(stdout, "installed") {
+		t.Errorf("powershell install: code=%d\n%s", code, stdout)
+	}
+	// …and its list preexec row says the same, now that its profile exists.
+	stdout, _, code = runJogEnv(t, home, env, "shell", "list")
+	if code != 0 || !strings.Contains(stdout, "not supported") {
+		t.Errorf("list missing powershell's not-supported row: code=%d\n%s", code, stdout)
 	}
 
 	// A hand-written alias is recognized and never touched — by install
@@ -2413,16 +2494,34 @@ func TestShell(t *testing.T) {
 	if err := os.WriteFile(loginRC, []byte(hand), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	stdout, _, code = runJogEnv(t, home, env, "shell", "install")
+	stdout, _, code = runJogEnv(t, home, env, "shell", "install", "--no-preexec")
 	if code != 0 || !strings.Contains(stdout, "by hand") {
 		t.Errorf("hand-added install: code=%d\n%s", code, stdout)
 	}
-	stdout, _, code = runJogEnv(t, home, env, "shell", "uninstall", loginName)
+	stdout, _, code = runJogEnv(t, home, env, "shell", "uninstall", "--no-preexec", loginName)
 	if code != 0 || !strings.Contains(stdout, "not added by jog") {
 		t.Errorf("hand-added uninstall: code=%d\n%s", code, stdout)
 	}
 	if b := string(mustRead(t, loginRC)); b != hand {
 		t.Errorf("hand-written rc modified: %q", b)
+	}
+
+	// Same recognition for a hand-wired preexec hook — any unmarked line
+	// invoking `jog shell-hook`.
+	handHook := "precmd() { jog shell-hook -- \"$1\"; }\n"
+	if err := os.WriteFile(bashrc, []byte(handHook), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	stdout, _, code = runJogEnv(t, home, env, "shell", "install", "--no-alias", "bash")
+	if code != 0 || !strings.Contains(stdout, "wired by hand") {
+		t.Errorf("hand-wired install: code=%d\n%s", code, stdout)
+	}
+	stdout, _, code = runJogEnv(t, home, env, "shell", "uninstall", "--no-alias", "bash")
+	if code != 0 || !strings.Contains(stdout, "not added by jog") {
+		t.Errorf("hand-wired uninstall: code=%d\n%s", code, stdout)
+	}
+	if b := string(mustRead(t, bashrc)); b != handHook {
+		t.Errorf("hand-wired rc modified: %q", b)
 	}
 
 	// A bare command group prints its help; unknown shells and an
@@ -2438,6 +2537,85 @@ func TestShell(t *testing.T) {
 		if _, stderr, code := runJogEnv(t, home, badEnv, "shell", "install"); code != 2 || !strings.Contains(stderr, "cannot tell your shell") {
 			t.Errorf("unknown $SHELL: code=%d %q", code, stderr)
 		}
+	}
+}
+
+// TestShellHook covers `jog shell-hook`, the preexec runtime entry:
+// silent exit-0 snapshots causally before the typed command, the
+// --history index strip, jog-prefixed skips, and the `--`/help
+// interplay. The harness's CI=1 keeps the maintenance spawns inert.
+func TestShellHook(t *testing.T) {
+	tr := testrepo.New(t)
+	tr.Write("a.txt", "one\n")
+	tr.Commit("base")
+	tr.Write("b.txt", "fresh\n") // a clean tree would no-op the snapshot
+
+	stdout, stderr, code := runJog(t, tr.Dir, "shell-hook", "--", "rm -rf build")
+	if code != 0 || stdout != "" || stderr != "" {
+		t.Fatalf("shell-hook: code=%d stdout=%q stderr=%q — must be silent", code, stdout, stderr)
+	}
+	if got := tr.Git("log", "-1", "--format=%s", "refs/jog/main"); got != "pre: rm -rf build" {
+		t.Errorf("subject = %q", got)
+	}
+
+	// --history strips bash's leading entry number (the * marks a
+	// modified history entry).
+	tr.Write("b.txt", "fresh2\n")
+	stdout, stderr, code = runJog(t, tr.Dir, "shell-hook", "--history", "--", "  42* rm -rf build")
+	if code != 0 || stdout != "" || stderr != "" {
+		t.Fatalf("--history: code=%d stdout=%q stderr=%q", code, stdout, stderr)
+	}
+	if got := tr.Git("log", "-1", "--format=%s", "refs/jog/main"); got != "pre: rm -rf build" {
+		t.Errorf("--history subject = %q", got)
+	}
+
+	// jog commands snapshot themselves — the hook skips them.
+	tr.Write("b.txt", "fresh3\n")
+	tip := tr.Git("rev-parse", "refs/jog/main")
+	if _, _, code := runJog(t, tr.Dir, "shell-hook", "--", "jog log"); code != 0 {
+		t.Errorf("jog-prefixed: code=%d", code)
+	}
+	if got := tr.Git("rev-parse", "refs/jog/main"); got != tip {
+		t.Errorf("a `jog …` cmdline must not snapshot")
+	}
+
+	// An empty cmdline still snapshots, labeled honestly.
+	stdout, stderr, code = runJog(t, tr.Dir, "shell-hook", "--", "")
+	if code != 0 || stdout != "" || stderr != "" {
+		t.Fatalf("empty cmdline: code=%d stdout=%q stderr=%q", code, stdout, stderr)
+	}
+	if got := tr.Git("log", "-1", "--format=%s", "refs/jog/main"); got != "pre: shell command" {
+		t.Errorf("empty-cmdline subject = %q", got)
+	}
+
+	// A typed command literally equal to --help arrives after `--`: it is
+	// snapshotted, never answered with a help page.
+	tr.Write("b.txt", "fresh4\n")
+	stdout, stderr, code = runJog(t, tr.Dir, "shell-hook", "--", "--help")
+	if code != 0 || stdout != "" || stderr != "" {
+		t.Fatalf("--help payload: code=%d stdout=%q stderr=%q", code, stdout, stderr)
+	}
+	if got := tr.Git("log", "-1", "--format=%s", "refs/jog/main"); got != "pre: --help" {
+		t.Errorf("--help payload subject = %q", got)
+	}
+
+	// Outside a repo: silent no-op, still exit 0.
+	loose := t.TempDir()
+	stdout, stderr, code = runJog(t, loose, "shell-hook", "--", "rm x")
+	if code != 0 || stdout != "" || stderr != "" {
+		t.Errorf("outside repo: code=%d stdout=%q stderr=%q", code, stdout, stderr)
+	}
+
+	// Bare misuse by a human: exit 0 with a stderr pointer.
+	stdout, stderr, code = runJog(t, loose, "shell-hook")
+	if code != 0 || stdout != "" || !strings.Contains(stderr, "jog shell install") {
+		t.Errorf("bare shell-hook: code=%d stdout=%q stderr=%q", code, stdout, stderr)
+	}
+
+	// …but --help with no `--` is a real help request.
+	stdout, _, code = runJog(t, loose, "shell-hook", "--help")
+	if code != 0 || !strings.Contains(stdout, "usage:") {
+		t.Errorf("shell-hook --help: code=%d\n%s", code, stdout)
 	}
 }
 
@@ -2458,21 +2636,34 @@ func TestInstallInteractive(t *testing.T) {
 		return home, append(fakeHome(home), "SHELL=/bin/zsh")
 	}
 
-	// All yes: alias, claude, vim.
+	// All yes: alias, preexec (where the login shell has one), claude, vim.
+	preexecLine := loginPreexecLine()
+	allYes, allNo := "y\ny\ny\ny\n", "n\nn\nn\nn\n" // an unread trailing answer is harmless
+	if preexecLine == "" {
+		allYes = "y\ny\ny\n" // powershell login: no preexec question
+	}
 	home, env := newHome()
 	_, loginRC, loginDisplay, markedLine := loginShellFixture(home)
-	stdout, _, code := runJogEnvStdin(t, home, env, "y\ny\ny\n", "install")
+	stdout, _, code := runJogEnvStdin(t, home, env, allYes, "install")
 	if code != 0 {
 		t.Fatalf("install: code=%d\n%s", code, stdout)
 	}
 	loginLine := strings.SplitN(markedLine, " # jog", 2)[0]
-	for _, want := range []string{"add `" + loginLine + "` to " + loginDisplay + "?", "detected agents (claude)", "vim detected"} {
+	wants := []string{"add `" + loginLine + "` to " + loginDisplay + "?", "detected agents (claude)", "vim detected"}
+	if preexecLine != "" {
+		wants = append(wants, "also snapshot before every command, not just git?")
+	}
+	for _, want := range wants {
 		if !strings.Contains(stdout, want) {
 			t.Errorf("install output missing %q:\n%s", want, stdout)
 		}
 	}
-	if b := string(mustRead(t, loginRC)); !strings.Contains(b, "jog git") {
+	b := string(mustRead(t, loginRC))
+	if !strings.Contains(b, "jog git") {
 		t.Errorf("login rc missing alias:\n%s", b)
+	}
+	if preexecLine != "" && !strings.Contains(b, preexecLine) {
+		t.Errorf("login rc missing the preexec line:\n%s", b)
 	}
 	if b := string(mustRead(t, filepath.Join(home, ".claude", "settings.json"))); !strings.Contains(b, hookNeedle("claude")) {
 		t.Errorf("claude settings not wired:\n%s", b)
@@ -2484,7 +2675,7 @@ func TestInstallInteractive(t *testing.T) {
 	// All no: nothing changes.
 	home2, env2 := newHome()
 	_, loginRC2, _, _ := loginShellFixture(home2)
-	stdout, _, code = runJogEnvStdin(t, home2, env2, "n\nn\nn\n", "install")
+	stdout, _, code = runJogEnvStdin(t, home2, env2, allNo, "install")
 	if code != 0 {
 		t.Fatalf("all-no install: code=%d\n%s", code, stdout)
 	}
@@ -2508,11 +2699,30 @@ func TestInstallInteractive(t *testing.T) {
 		t.Errorf("EOF install still wired agents")
 	}
 
-	// --yes: no stdin at all, every default taken.
+	// Alias yes, preexec no: only the alias line lands.
+	if preexecLine != "" {
+		home5, env5 := newHome()
+		_, loginRC5, _, markedLine5 := loginShellFixture(home5)
+		stdout, _, code = runJogEnvStdin(t, home5, env5, "y\nn\nn\nn\n", "install")
+		if code != 0 {
+			t.Fatalf("alias-only install: code=%d\n%s", code, stdout)
+		}
+		b := string(mustRead(t, loginRC5))
+		if !strings.Contains(b, markedLine5) || strings.Contains(b, "jog shell-hook") {
+			t.Errorf("alias yes + preexec no wrote the wrong lines:\n%s", b)
+		}
+	}
+
+	// --yes: no stdin at all, every default taken — BOTH shell lines land.
 	home4, env4 := newHome()
+	_, loginRC4, _, markedLine4 := loginShellFixture(home4)
 	stdout, _, code = runJogEnvStdin(t, home4, env4, "", "install", "--yes")
 	if code != 0 {
 		t.Fatalf("install --yes: code=%d\n%s", code, stdout)
+	}
+	if b := string(mustRead(t, loginRC4)); !strings.Contains(b, markedLine4) ||
+		(preexecLine != "" && !strings.Contains(b, preexecLine)) {
+		t.Errorf("--yes rc missing a marked line:\n%s", b)
 	}
 	if _, err := os.Stat(filepath.Join(home4, ".claude", "settings.json")); err != nil {
 		t.Errorf("--yes skipped agents: %v", err)
@@ -2542,10 +2752,14 @@ func TestUninstallCommand(t *testing.T) {
 		t.Fatalf("seed install: code=%d\n%s", code, stdout)
 	}
 
-	// Declined: everything stays.
+	// Declined: everything stays. The summary names both shell surfaces
+	// (the --yes seed wired the preexec hook wherever the shell has one).
 	stdout, _, code := runJogEnvStdin(t, home, env, "n\n", "uninstall")
 	if code != 0 || !strings.Contains(stdout, "currently wired:") || !strings.Contains(stdout, "nothing removed") {
 		t.Fatalf("declined uninstall: code=%d\n%s", code, stdout)
+	}
+	if loginPreexecLine() != "" && !strings.Contains(stdout, "preexec") {
+		t.Errorf("summary missing the preexec row:\n%s", stdout)
 	}
 	if _, err := os.Stat(vimPluginPath(home)); err != nil {
 		t.Errorf("declined uninstall removed the vim hook: %v", err)
@@ -2556,8 +2770,8 @@ func TestUninstallCommand(t *testing.T) {
 	if code != 0 || !strings.Contains(stdout, "snapshots are untouched") {
 		t.Fatalf("uninstall --yes: code=%d\n%s", code, stdout)
 	}
-	if b := string(mustRead(t, loginRC)); strings.Contains(b, "jog git") {
-		t.Errorf("login rc still aliased:\n%s", b)
+	if b := string(mustRead(t, loginRC)); strings.Contains(b, "jog git") || strings.Contains(b, "jog shell-hook") {
+		t.Errorf("login rc still carries jog lines:\n%s", b)
 	}
 	if b := string(mustRead(t, filepath.Join(home, ".claude", "settings.json"))); strings.Contains(b, "jog hook") {
 		t.Errorf("claude settings still wired:\n%s", b)

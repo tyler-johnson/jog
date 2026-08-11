@@ -1,0 +1,19 @@
+jog shell-hook — shell preexec hook entry point
+
+usage:
+  jog shell-hook [--history] -- <cmdline>    (the shell invokes this before each command)
+
+Snapshots the repository at the shell's working directory, causally
+before the typed command runs — by the time `rm -rf` executes, the
+snapshot exists. Always exits 0 with no output: anything printed here
+would land in your terminal ahead of every command. Outside a git repo
+it is a fast no-op, and commands starting with `jog` are skipped —
+jog's own commands snapshot themselves.
+
+The command line arrives after `--`, so a command literally named
+--help is snapshotted, never answered with this page. --history strips
+the leading entry number bash's `history 1` prepends (bash has no other
+way to hand PS0 the typed line).
+
+This is the command `jog shell install` wires into your shell's preexec
+mechanism; it is not meant to be run by hand.

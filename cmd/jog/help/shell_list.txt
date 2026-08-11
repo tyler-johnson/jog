@@ -3,6 +3,8 @@ jog shell list — every supported shell and what is installed
 usage:
   jog shell list
 
-One row per supported shell: its rc file, whether that file exists, and
-whether jog's alias line (or a hand-written one) is present. The names
-it prints are the ones install and uninstall accept.
+Two rows per supported shell — the alias and the preexec hook — with
+its rc file and whether jog's marked line (or a hand-written one) is
+present. PowerShell's preexec row reads "not supported": it has no
+preexec mechanism. The names printed are the ones install and uninstall
+accept.

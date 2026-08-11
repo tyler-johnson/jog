@@ -1,6 +1,6 @@
 // Package setup implements `jog install` and `jog uninstall` — the
-// guided walk through jog's three wiring surfaces: the shell alias,
-// agent hooks, and editor save hooks.
+// guided walk through jog's three wiring surfaces: the shell (the git
+// alias and the preexec hook), agent hooks, and editor save hooks.
 //
 // It owns no mechanics: every yes routes to the same package the
 // standalone command uses (`jog shell`, `jog agents`, `jog editors`),
@@ -69,37 +69,71 @@ func Install(args []string) int {
 	}
 	note := func(n string) { fmt.Println(install.StyleDim.Render("· " + n)) }
 
-	fmt.Println(install.StyleTitle.Render("jog install") + install.StyleDim.Render(" — the alias, agent hooks, and editor hooks, one question each"))
+	fmt.Println(install.StyleTitle.Render("jog install") + install.StyleDim.Render(" — the shell wiring, agent hooks, and editor hooks"))
 	fmt.Println()
 
-	// The alias: the login shell is the default question; other shells
-	// with an rc file on disk are offered as follow-ups.
+	// The shell: two questions for the login shell — the alias, then the
+	// preexec hook (where the shell has one). Other shells with an rc
+	// file on disk are offered as follow-ups and get the same surfaces
+	// the user chose here.
 	login, haveLogin := shell.Login()
 	aborted := false
 	if !haveLogin {
 		note("cannot tell your shell from $SHELL — `jog shell install <name>` wires the alias by hand")
 	}
+	var aliasWant, preexecWant bool
 	for _, st := range shell.Statuses() {
-		if aborted || (st.Name != login && !st.RCExists) || st.Installed || st.ByHand {
-			if st.Name == login && (st.Installed || st.ByHand) {
-				note(st.Name + " already has the alias (" + st.RC + ")")
-			}
+		if st.Name != login {
 			continue
 		}
-		prompt := "add `" + st.Line + "` to " + st.RC + "?"
-		def := true
-		if st.Name != login {
-			prompt = "also found " + st.RC + " — add the alias there too?"
-			def = false
+		aliasNew, preexecNew := false, false
+		if st.Installed || st.ByHand {
+			note(st.Name + " already has the alias (" + st.RC + ")")
+			aliasWant = true
+		} else if answer, ok := ask("add `"+st.Line+"` to "+st.RC+"?", true); !ok {
+			aborted = true
+		} else {
+			aliasWant, aliasNew = answer, answer
 		}
-		answer, ok := ask(prompt, def)
+		if !aborted && st.Preexec != "" {
+			if st.PreexecInstalled || st.PreexecByHand {
+				note(st.Name + " already has the preexec hook (" + st.RC + ")")
+				preexecWant = true
+			} else if answer, ok := ask("also snapshot before every command, not just git? (preexec hook in "+st.RC+")", true); !ok {
+				aborted = true
+			} else {
+				preexecWant, preexecNew = answer, answer
+			}
+		}
+		// Answers already given are honored even when a later question
+		// hit EOF — every completed step stays.
+		if aliasNew || preexecNew {
+			fmt.Println()
+			step(shell.Run(shellInstallArgs(aliasNew, preexecNew, st.Name)))
+			fmt.Println()
+		}
+	}
+	for _, st := range shell.Statuses() {
+		if aborted || st.Name == login || !st.RCExists {
+			continue
+		}
+		wantAlias := aliasWant && !st.Installed && !st.ByHand
+		wantPreexec := preexecWant && st.Preexec != "" && !st.PreexecInstalled && !st.PreexecByHand
+		if !wantAlias && !wantPreexec {
+			continue
+		}
+		prompt := "also found " + st.RC + " — add the alias there too?"
+		if !wantAlias {
+			prompt = "also found " + st.RC + " — add the preexec hook there too?"
+		}
+		answer, ok := ask(prompt, false)
 		if !ok {
 			aborted = true
 			break
 		}
 		if answer {
 			fmt.Println()
-			step(shell.Run([]string{"install", st.Name}))
+			step(shell.Run(shellInstallArgs(wantAlias, wantPreexec, st.Name)))
 			fmt.Println()
 		}
 	}
@@ -157,6 +191,19 @@ func Install(args []string) int {
 	return code
 }
 
+// shellInstallArgs scopes `jog shell install` to the surfaces the user
+// said yes to.
+func shellInstallArgs(alias, preexec bool, name string) []string {
+	args := []string{"install"}
+	if !alias {
+		args = append(args, "--no-alias")
+	}
+	if !preexec {
+		args = append(args, "--no-preexec")
+	}
+	return append(args, name)
+}
+
 // Uninstall is `jog uninstall`: show what is wired, confirm once, then
 // run each surface's own uninstaller.
 func Uninstall(args []string) int {
@@ -165,10 +212,16 @@ func Uninstall(args []string) int {
 		return 2
 	}
 
-	var shells, agentNames, editorNames []string
+	var shells, preexecShells, sweepShells, agentNames, editorNames []string
 	for _, st := range shell.Statuses() {
 		if st.Installed {
 			shells = append(shells, st.Name)
+		}
+		if st.PreexecInstalled {
+			preexecShells = append(preexecShells, st.Name)
+		}
+		if st.Installed || st.PreexecInstalled {
+			sweepShells = append(sweepShells, st.Name)
 		}
 	}
 	for _, st := range agents.Statuses() {
@@ -184,8 +237,8 @@ func Uninstall(args []string) int {
 
 	fmt.Println(install.StyleTitle.Render("jog uninstall") + install.StyleDim.Render(" — remove jog's wiring"))
 	fmt.Println()
-	if len(shells)+len(agentNames)+len(editorNames) == 0 {
-		fmt.Println("nothing is wired — no alias, agent hooks, or editor hooks found.")
+	if len(sweepShells)+len(agentNames)+len(editorNames) == 0 {
+		fmt.Println("nothing is wired — no alias, preexec hook, agent hooks, or editor hooks found.")
 		binaryHint()
 		return 0
 	}
@@ -196,6 +249,7 @@ func Uninstall(args []string) int {
 	}
 	fmt.Println("currently wired:")
 	row("alias", shells)
+	row("preexec", preexecShells)
 	row("agents", agentNames)
 	row("editors", editorNames)
 	fmt.Println()
@@ -215,8 +269,8 @@ func Uninstall(args []string) int {
 			code = c
 		}
 	}
-	if len(shells) > 0 {
-		step(shell.Run(append([]string{"uninstall"}, shells...)))
+	if len(sweepShells) > 0 {
+		step(shell.Run(append([]string{"uninstall"}, sweepShells...)))
 		fmt.Println()
 	}
 	if len(agentNames) > 0 {
