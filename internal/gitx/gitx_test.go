@@ -162,7 +162,9 @@ func TestReadRefLinkedWorktree(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if got := r.CommonDir(); got != tr.GitDir {
+	// git prints forward-slash paths on every OS; CommonDir joins with the
+	// host separator — compare in slash form.
+	if got := r.CommonDir(); filepath.ToSlash(got) != filepath.ToSlash(tr.GitDir) {
 		t.Errorf("CommonDir = %q, want %q", got, tr.GitDir)
 	}
 	if got, ok := r.ReadRef("refs/heads/main"); !ok || got != sha {
