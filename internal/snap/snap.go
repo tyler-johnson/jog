@@ -12,7 +12,7 @@
 // batched rev-parse, config from one --get-regexp, and the D2 status
 // pre-scan doubles as a clean-tree detector that skips the shadow index
 // entirely — five spawns for a dirty-but-unchanged no-op, three for a clean
-// tree.
+// tree. TestSpawnBudget gates every scenario's exact count.
 package snap
 
 import (

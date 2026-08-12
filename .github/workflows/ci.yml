@@ -19,6 +19,11 @@ jobs:
           go-version-file: go.mod
       - run: go vet ./...
       - run: go test ./...
+      # Rerun the perf smoke and spawn budget verbosely so the timing
+      # numbers and spawn counts are visible in the CI log (TestNoOpPerf
+      # is advisory in CI; TestSpawnBudget gates everywhere).
+      - if: runner.os == 'Linux'
+        run: go test ./internal/snap -run 'TestNoOpPerf|TestSpawnBudget' -v -count=1
       - run: go build ./...
       # The installers can't run in CI, but they can at least parse.
       - if: runner.os == 'Linux'
