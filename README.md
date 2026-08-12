@@ -26,11 +26,11 @@ restored to c0ffee1 (2 minutes ago — pre: git status): 14 restored, 0 deleted
 
 - [Why jog](#why-jog)
 - [Install](#install)
+- [Recovery cookbook](#recovery-cookbook)
+- [Usage](#usage)
 - [Shell](#shell)
 - [Agents](#agents)
 - [Editors](#editors)
-- [Usage](#usage)
-- [Recovery cookbook](#recovery-cookbook)
 - [What jog will never touch](#what-jog-will-never-touch)
 - [Why not jog](#why-not-jog)
 - [Configuration](#configuration)
@@ -70,7 +70,7 @@ made it commonplace. Jog aims to solve this.
 
 ## Install
 
-**1. Install the binary:**
+### Install script
 
 ```sh
 # linux / macOS — verifies checksums, lands in ~/.local/bin
@@ -82,13 +82,23 @@ curl -fsSL https://raw.githubusercontent.com/tyler-johnson/jog/main/install.sh |
 irm https://raw.githubusercontent.com/tyler-johnson/jog/main/install.ps1 | iex
 ```
 
-Script installs **keep themselves up to date**: jog checks for new
+The script ends by launching `jog install` — the guided setup that
+wires jog's trigger surfaces, one question each: your shell (the git
+alias and the preexec hook), hooks + a skill for every agent client on
+this machine, and a post-save hook per detected editor. Every yes runs
+the same installer the standalone commands run — the [Shell](#shell),
+[Agents](#agents), and [Editors](#editors) sections below have the full
+picture — and `jog uninstall` reverses all of it. Re-running
+`jog install` is always safe; `--yes` takes every default without
+asking.
+
+Script installs also **keep themselves up to date**: jog checks for new
 releases daily in the background and installs them silently — install
 once and forget it. `jog config autoUpdate false` prints a one-line
 notice instead of installing, and `jog config updateCheck false` opts
 out of all of it.
 
-Other ways to install:
+### Other ways to install
 
 ```sh
 # Homebrew (macOS / Linux)
@@ -104,30 +114,239 @@ go installs update through their own tools (`brew upgrade jog` /
 `go install …@latest`) — jog prints a one-line notice when a new release
 exists and says which command applies.
 
-**2. Wire it up:**
+However jog got onto the machine, finish by running `jog install` — the
+same guided setup the script launches.
 
-```sh
-jog install   # guided — one question per surface
+### Verify
+
+Make any change in a repo, run `git status`, then bare `jog` — the
+timeline it prints should show a `pre: git status` entry: the alias is
+snapshotting. `jog doctor` checks all the wiring and every invariant
+the engine depends on.
+
+```console
+$ git status             # through the alias — snapshots first
+$ jog
+no changes since the last snapshot on main
+
+  c0ffee1  9 seconds ago  pre: git status
 ```
 
-The wizard walks jog's three trigger surfaces and wires the ones you say
-yes to: your shell (the git alias and the preexec hook), hooks + a skill
-for every agent client on this machine, and a post-save hook per
-detected editor. Each yes runs the same installer the standalone
-commands run, so nothing is reachable only through the wizard — the
-[Shell](#shell), [Agents](#agents), and [Editors](#editors) sections
-below have the full picture. `--yes` takes every default without asking
-(for scripts and dotfiles), everything is additive and idempotent, and
-`jog uninstall` reverses all of it.
+## Recovery cookbook
 
-**3. Verify:** make any change in a repo, run `git status`, then `jog log`
-— you should see a `pre: git status` entry.
+Recovering is two steps: locate the snapshot to roll back to, then
+restore to it.
+
+### Locating the snapshot
+
+`jog log` browses this branch's timeline. In a terminal it's an
+interactive browser — scrub with a live diff preview to find the
+version where things still worked, and press `r` to restore right
+there. Piped, it prints plainly; paths scope it, `-p` adds patches:
+
+```console
+$ jog log
+c0ffee1  2 minutes ago   pre: git status
+a1b2c3d  9 minutes ago   claude[b3f1a2c4]: Bash(go test ./...)
+9e8d7c6  14 minutes ago  manual: before parser rewrite
+```
+
+`jog since` answers "what did I actually change?" — a per-file summary
+since the last command boundary, or any time you give it:
+
+```console
+$ jog since 1h           # everything changed since the snapshot nearest 1h ago
+since 4d5e6f7 (1 hour ago — pre: git checkout main)
+ src/parser.go            | 41 ++++++++---
+ src/parser_test.go (new) | 66 ++++++++++++++++++++
+ 2 files changed, 96 insertions(+), 11 deletions(-)
+```
+
+If the work was on another branch or in a worktree, `jog branches`
+shows every branch's chain — deleted branches included — and
+`jog log --all` interleaves every chain's timeline:
+
+```sh
+jog branches
+jog log --all
+```
+
+### Restoring
+
+Point `jog restore` at what you found: paths for the files to bring
+back, and `--at` with a snapshot id, a time, or a position. `--all`
+restores the whole tree instead, including deleting files created
+since:
+
+```console
+$ jog restore src/parser.go --at a1b2c3d
+restored src/parser.go from a1b2c3d (9 minutes ago — claude[b3f1a2c4]: Bash(go test ./...))
+
+$ jog restore src/config.yaml --at 9m
+restored src/config.yaml from 2c4d6e8 (9 minutes ago — claude[b3f1a2c4]: prompt "clean up the src tree")
+
+$ jog restore --all --at 25m
+restored to 9e8d7c6 (26 minutes ago — manual: before parser rewrite): 11 restored, 3 deleted
+(undo: jog restore --all)
+```
+
+Every restore snapshots first, so undo is itself undoable.
+
+## Usage
+
+Two disjoint namespaces, one rule: **`jog git` is the only door to git.**
+Every other verb is jog's own; anything else is an error — jog never
+guesses (`mcp` is reserved for a future release). The wiring and
+maintenance commands (`install`, `shell`, `agents`, `editors`,
+`config`, `doctor`, `update`) are covered in their own sections;
+`jog help <command>` has the full page for everything.
+
+### jog
+
+Bare `jog` is a deliberate checkpoint: snapshot now, then show the top
+of the timeline. `jog -m "msg"` labels it.
+
+```sh
+jog                              # snapshot now, show the top of the timeline
+jog -m "before parser rewrite"   # labeled: manual: before parser rewrite
+```
+
+### jog log
+
+Browse the timeline of snapshots on this branch. In a terminal it's an
+interactive browser — scrub with a live diff preview, press `r` to
+restore after a y/n confirm. Piped, it prints plainly: id, age,
+provenance, files changed. With paths, browsing and restoring are
+scoped to those paths.
+
+```sh
+jog log                   # this branch's timeline
+jog log src/parser.go     # scoped: only snapshots touching these paths
+jog log -p -n 5           # the newest 5, with full patches
+jog log --all             # every branch's chain, interleaved
+jog log --json            # machine-readable
+jog log --format='%h %s'  # any git log format
+jog snaps                 # snaps and pick are aliases of log
+```
+
+### jog branches
+
+One row per branch's snapshot chain — count, newest snapshot, and
+whether the branch still exists. Deleted branches' chains stay listed
+until their snapshots age out, so you can see what `jog trim --gone`
+would drop before it drops it.
+
+```console
+$ jog branches
+* main      47 snapshots, newest 2m ago — pre: git status
+  feature   12 snapshots, newest 3d ago — manual: wip on parser
+- old-work   5 snapshots, newest 34d ago — manual: spike
+- Deleted branch, clean up with jog trim --gone
+
+$ jog branches --json    # machine-readable; jog branch is an alias
+```
+
+### jog since
+
+What changed since a snapshot — per-file summary, `-p` for patches.
+With no target it diffs against your last command boundary; give it a
+time or position (`jog since 1h`) to widen the window, and paths to
+narrow it.
+
+```sh
+jog since                 # since the last command boundary
+jog since 1h              # since the snapshot nearest an hour ago
+jog since -p 30m          # patches instead of the per-file summary
+jog since '@{3}' src/     # three snapshots back, scoped to src/
+```
+
+### jog restore
+
+Restore files — or with `--all`, the whole tree, including deleting
+files created since — from a snapshot. Worktree only: your index,
+branches, and HEAD never move.
+
+```sh
+jog restore src/parser.go            # one file, from the newest snapshot
+jog restore src/parser.go --at 1h    # …as it was an hour ago
+jog restore --all --at '@{2}'        # whole tree, two snapshots back
+jog restore --all                    # back to the newest snapshot (the undo)
+jog back src/parser.go               # back is an alias of restore
+```
+
+Every restore snapshots first, so undo is itself undoable.
+
+`--at` (and `since`'s target slot) accepts a snap id from `jog log`, a
+time, or a position on the timeline:
+
+- a time: `--at 30m`, `--at 1h`, `--at 2d`, `--at 1w` — plus anything
+  git's date syntax accepts (`--at yesterday`, `--at 2.hours.ago`)
+- a position: `--at '@{1}'` is one snapshot ago, `--at '@{2}'` two back —
+  [git's reflog syntax](https://git-scm.com/docs/gitrevisions), counted
+  on the snapshot timeline (keep the quotes; some shells expand braces)
+
+Asking for a time older than the oldest snapshot falls back to the
+oldest, with a warning.
+
+### jog git
+
+Pure passthrough: snapshot, then run the real git command exactly as
+typed — what the alias expands to. jog matches no verbs and
+reimplements nothing, so no git command, user alias, or future git
+feature can ever collide with it.
+
+```sh
+git checkout -- src/    # typed git goes through the alias = jog git checkout -- src/
+jog git stash pop       # …or spell the passthrough out yourself
+```
+
+### jog uninstall
+
+Shows everything jog wired — the shell lines, agent hooks and skills,
+editor hooks — and removes all of it after one confirmation (`--yes`
+skips it). Only jog's own marked lines and managed files are touched:
+a hand-written alias, your settings, and any file carrying your edits
+are left alone, with a note.
+
+```console
+$ jog uninstall
+jog uninstall — remove jog's wiring
+
+currently wired:
+  alias    zsh
+  preexec  zsh
+  agents   claude
+  editors  vim
+
+remove all of it? [y/N] y
+
+shell — the git alias and preexec hook
+  zsh        alias   ✓ removed the alias from ~/.zshrc
+  zsh        preexec ✓ removed the preexec hook from ~/.zshrc
+
+claude — Claude Code
+  hooks  ✓ removed 2 jog hook(s) from ~/.claude/settings.json — everything else untouched
+  skill  ✓ removed — ~/.claude/skills/jog/SKILL.md
+
+vim — Vim
+  hook   ✓ removed — ~/.vim/plugin/jog.vim
+
+snapshots are untouched — they live in each repo's refs/jog/*; `jog trim` prunes them.
+the binary itself: rm ~/.local/bin/jog
+```
+
+Snapshots are deliberately not part of removal — they're plain git
+objects in each repo, and `jog trim` (or deleting `refs/jog/*`) is how
+they go. The closing line names the right way to remove the binary for
+how it was installed (`rm`, `brew uninstall jog`, …).
 
 ## Shell
 
-Your shell gets two independent lines, each serving a different purpose.
-`jog shell install` writes both — one marked line each in the shell's rc
-file; a version you already wired by hand is recognized and left alone.
+Your shell can get two independent lines, each serving a different
+purpose: the alias (the standard install) and the preexec hook (opt-in
+— hooking every command is a bigger ask, so it's never wired silently).
+Each is one marked line in the shell's rc file; a version you already
+wired by hand is recognized and left alone.
 
 ### The alias
 
@@ -157,9 +376,9 @@ expects exact git behavior.
 
 The alias only fires on git commands. The preexec hook covers the rest
 of your terminal: it snapshots before *every* interactive command, so
-`rm -rf`, `sed -i`, and `make clean` have a restore point too. It's one
-line calling `jog shell-hook` from the shell's before-each-command
-mechanism:
+`rm -rf`, `sed -i`, and `make clean` have a restore point too. Opt in
+with `jog shell install --preexec`; it's one line calling
+`jog shell-hook` from the shell's before-each-command mechanism:
 
 ```sh
 # bash (~/.bashrc) — via PS0, bash 4.4+ (older bash ignores it harmlessly)
@@ -180,13 +399,15 @@ repos, and costs one no-op jog run per command inside them. On a git
 command both lines fire; the second snapshot is a no-op.
 
 ```sh
-jog shell install      # both lines, login shell (or name bash, zsh, fish, powershell)
-jog shell list         # every supported shell and what is installed
-jog shell uninstall    # removes exactly what install wrote
+jog shell install               # the alias, login shell (or name bash, zsh, fish, powershell)
+jog shell install --preexec     # …plus the preexec hook
+jog shell list                  # every supported shell and what is installed
+jog shell uninstall             # removes both lines, wherever install wrote them
 ```
 
-`--no-alias` / `--no-preexec` scope install and uninstall to one surface
-— `jog shell uninstall --no-alias` turns off the before-every-command
+`--no-alias` scopes install to the hook alone (`--preexec --no-alias`);
+on uninstall, `--no-alias` / `--no-preexec` spare one surface —
+`jog shell uninstall --no-alias` turns off the before-every-command
 snapshots and keeps the alias.
 
 ## Agents
@@ -275,121 +496,6 @@ project's `.idea` directory: re-run it in each project you want covered.
 > machine — its extension host loads from `~/.vscode-server`, and the
 > "Install in SSH" button copies your local machine's jog path.
 
-## Usage
-
-Two disjoint namespaces, one rule: **`jog git` is the only door to git.**
-
-| command | what it does |
-|---|---|
-| `jog` | snapshot now, show the top of the timeline |
-| `jog -m "msg"` | snapshot with a message (`manual: msg`) |
-| `jog log [-p] [-n N] [--all] [--json] [--format=F] [path…]` | browse the timeline — scrub with a diff preview, `r` restores after a y/n confirm; piped it prints plainly: id, age, provenance, files changed (`-p`: patches, `-n`: newest N, `--all`: every branch interleaved, `--json`: machine-readable, `--format`: git log format). With paths, browsing and restoring are scoped to those paths |
-| `jog since [T] [path…]` | what changed since a snapshot (default: your last command boundary; `-p`: patches) |
-| `jog restore <path>… [--at T]` | restore files from a snapshot (worktree only) |
-| `jog restore --all [--at T]` | restore the whole tree, including deleting files created since |
-| `jog git <args>` | snapshot, then run the real git command — what the alias expands to |
-| `jog trim [--dry-run] [--gone]` | drop snapshots older than `jog.keep` (default 90 days); `--gone` also drops deleted branches' chains; the previous tip stays at `refs/jog/@trash/<branch>` until the next trim |
-| `jog config [key [value]]` | list jog's settings with values and meanings — or get and set them |
-| `jog doctor [--fix]` | verify invariants, wiring, and liveness (`--fix` repairs the gc config) |
-| `jog install [--yes]` | guided setup — the shell wiring, agent hooks, and editor hooks (`--yes` takes the defaults; `jog uninstall` reverses it) |
-| `jog shell install` | the git alias + preexec hook in your login shell's rc file (`uninstall`, `list`; `--no-alias`/`--no-preexec` scope it; or name bash, zsh, fish, powershell) |
-| `jog agents install` | hooks + skill for every agent client on this machine (`uninstall`, `list`; `[hooks\|skill]` and client names narrow it; `--project`: this repo) |
-| `jog editors install <name>` | a post-save snapshot hook for one text editor (`uninstall`, `list`) |
-| `jog update` | update jog to the latest release, sha256-verified (script/binary installs; brew and go installs are pointed at their own upgrade command) |
-| `jog version` | print jog's version |
-
-`--at` (and `since`'s target slot) accepts a snap id from `jog log`, a
-time, or a position on the timeline:
-
-- a time: `--at 30m`, `--at 1h`, `--at 2d`, `--at 1w` — plus anything
-  git's date syntax accepts (`--at yesterday`, `--at 2.hours.ago`)
-- a position: `--at '@{1}'` is one snapshot ago, `--at '@{2}'` two back —
-  [git's reflog syntax](https://git-scm.com/docs/gitrevisions), counted
-  on the snapshot timeline (keep the quotes; some shells expand braces)
-
-Asking for a time older than the oldest snapshot falls back to the
-oldest, with a warning.
-
-A reading rule for the timeline: provenance records **what jog was running
-ahead of**, never who made the changes. Manual edits swept up by an
-agent-triggered snapshot are attributed to that trigger — jog can't know who
-typed between boundaries, and refuses to guess.
-
-`snaps` and `pick` are aliases of `jog log`, and `back` of `jog restore`
-— older muscle memory keeps working.
-
-`mcp` is reserved for a future release.
-Anything else is an error — jog never guesses.
-
-## Recovery cookbook
-
-**An agent deleted a file three prompts ago.** `jog log src/config.yaml`
-opens the browser scoped to the file — scrub to the version you want and
-press `r`. Or entirely from the prompt:
-
-```console
-$ jog log src/config.yaml | head    # piped: the plain list
-f3a9b12  8 minutes ago  claude[b3f1a2c4]: Bash(rm -rf src/old)
-
-D	src/config.yaml
-$ jog restore src/config.yaml --at 9m
-restored src/config.yaml from 2c4d6e8 (9 minutes ago — claude[b3f1a2c4]: prompt "clean up the src tree")
-```
-
-**Roll everything back to before a refactor went sideways** — including
-deleting the files it scattered:
-
-```console
-$ jog restore --all --at 25m
-restored to 9e8d7c6 (26 minutes ago — manual: before parser rewrite): 11 restored, 3 deleted
-(undo: jog restore --all)
-```
-
-Every restore snapshots first, so undo is itself undoable.
-
-**What did I actually change in the last hour?**
-
-```console
-$ jog since 1h           # per-file summary since the snapshot nearest 1h ago
-$ jog log -p             # full patches, in your pager
-$ jog log src/parser/    # just one path's history
-```
-
-**Find the version of one file where it still worked**, scrubbing visually:
-
-```console
-$ jog log src/parser/lexer.go
-```
-
-**Script the timeline** — agents and scripts get structure without knowing
-how snapshots map onto git refs:
-
-```console
-$ jog log --json -n 5           # newest five: sha, ISO time, provenance, chain, files
-$ jog log --json src/ | jq -r '.[].provenance'
-$ jog log --format='%h %cI %s'  # any git log format, one entry per line
-```
-
-**The timeline is getting long.** Snapshots older than 90 days
-(configurable) age out on their own — a background trim rides a git
-command at most daily. The same command is there when you want it now:
-
-```console
-$ jog trim --dry-run     # the plan, touching nothing
-$ jog trim               # apply; the pre-trim tip stays at refs/jog/@trash/<branch>
-$ jog trim --gone        # also drop chains whose branch no longer exists
-```
-
-Trim is the only jog command that discards snapshots, and its last
-pre-trim state survives until the trim after next. A
-chain whose snapshots have all aged out is removed whole, so deleted
-branches' timelines eventually vanish on their own — `--gone` skips the
-wait. Both trim and `jog doctor` report how much disk the snapshots hold;
-the `maxSize` setting adds a total disk budget that trim enforces by
-dropping oldest snapshots first, one snapshot leniently — the snapshot
-that crosses the budget stays. `jog config autoTrim` changes the
-background cadence; `false` makes trim manual-only.
-
 ## What jog will never touch
 
 1. Your **index** — byte-identical across any jog operation (jog stages into
@@ -426,9 +532,10 @@ jog does **not** protect against:
 - **Ignored files.** Never snapshotted, by design — jog is not a backup
   system for `node_modules` or build artifacts.
 - **Terminal work without the shell wiring installed.** No trigger, no
-  snapshot. The standard `jog shell install` covers every interactive
-  command via the preexec hook (bash ≥ 4.4 for that half; PowerShell gets
-  the alias only), but a shell it was never wired into is unprotected.
+  snapshot. The alias only covers git commands; `jog shell install
+  --preexec` opts into a hook that snapshots before every interactive
+  command (bash ≥ 4.4; PowerShell has no preexec mechanism), but a
+  shell it was never wired into is unprotected.
 
 Also worth knowing:
 
