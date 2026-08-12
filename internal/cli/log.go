@@ -28,10 +28,13 @@ const logAllFormat = "--format=%n%C(auto,yellow)%h%C(auto,reset)  %C(auto,cyan)%
 
 // Log is `jog log [-p] [-n N] [--all] [--json] [--format=F] [path…]`:
 // the timeline of the current branch's chain (D5) — or with --all the whole
-// forest, every chain interleaved by time (plan D13). Interactive on a TTY;
-// otherwise rendered by real `git log` over the exact snapshot ranges,
-// exec'd so git's pager and coloring apply — or as JSON / a caller-supplied
-// format, so scripts and agents never need to know how snapshots map onto
+// forest, every chain interleaved by time (plan D13). The default views
+// (interactive on a TTY, plain rows when piped) render from the shared
+// timeline builder: every snapshot row carries the commit it was based on,
+// and commit/event rows are interleaved wherever HEAD moved. -p and
+// --format hand rendering to real `git log` over the exact snapshot ranges,
+// exec'd so git's pager and coloring apply — and --json emits the machine
+// shape, so scripts and agents never need to know how snapshots map onto
 // git refs and ranges. With paths, a restore from the browser touches only
 // those paths — `snaps` and `pick` are aliases (verb records what was
 // typed).
@@ -104,11 +107,11 @@ func Log(verb string, args []string) int {
 	// Best-effort; a failure must not block the read.
 	snap.Take(repo, provenance.Pre(strings.TrimSpace("jog "+verb+" "+strings.Join(args, " "))))
 
-	format := logFormat
 	var ranges []string
+	var boundaries map[string]bool
 	if all {
 		var err error
-		if ranges, err = forestRanges(repo); err != nil {
+		if ranges, boundaries, err = forestRanges(repo); err != nil {
 			fmt.Fprintf(os.Stderr, "jog: %v\n", err)
 			return 1
 		}
@@ -120,16 +123,9 @@ func Log(verb string, args []string) int {
 			fmt.Println("no snapshots anywhere yet — run `jog`, or any git command via the alias")
 			return 0
 		}
-		// %S attributes each entry to the chain it came from, spelled as
-		// passed — forestRanges passes `jog/<branch>` so the label is short.
-		format = logAllFormat
 	} else {
-		ref, rng, exists, err := chainRange(repo)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "jog: %v\n", err)
-			return 1
-		}
-		if !exists {
+		ref := chainRef(repo)
+		if _, err := repo.RunRead("rev-parse", "-q", "--verify", ref); err != nil {
 			if jsonOut {
 				fmt.Println("[]")
 				return 0
@@ -140,23 +136,48 @@ func Log(verb string, args []string) int {
 				strings.TrimPrefix(ref, "refs/jog/"))
 			return 0
 		}
+
+		// The default single-chain views render from the timeline builder —
+		// browse on a TTY, plain rows when piped. Only -p, --format, and
+		// --json continue past here to the range-based paths.
+		if !patch && userFormat == "" && !jsonOut {
+			n, _ := strconv.Atoi(limit) // "" → 0 = unlimited; validated above
+			if term.IsTerminal(int(os.Stdout.Fd())) {
+				return chainTUI(repo, ref, paths, n)
+			}
+			return logPiped(repo, ref, paths, n)
+		}
+
+		_, rng, boundary, _, err := chainRange(repo)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "jog: %v\n", err)
+			return 1
+		}
 		ranges = []string{rng}
+		if boundary != "" {
+			boundaries = map[string]bool{boundary: true}
+		}
 	}
 
 	// Machine output first: JSON is JSON on a TTY too, so scripts and
 	// agents get the same bytes everywhere.
 	if jsonOut {
-		return logJSON(repo, ranges, paths, limit)
+		return logJSON(repo, ranges, boundaries, paths, limit)
 	}
 
-	// On a terminal, browse instead of print: the same scrub-and-preview
-	// TUI as pick, over the whole tree. -p keeps the plain patch printout
-	// even on a TTY, --format means the caller wants specific bytes, and
-	// piped output is always the git passthrough.
+	// --all on a terminal: browse the forest. -p keeps the plain patch
+	// printout even on a TTY, --format means the caller wants specific
+	// bytes, and piped --all output is the git passthrough.
 	if !patch && userFormat == "" && term.IsTerminal(int(os.Stdout.Fd())) {
-		return logTUI(repo, all, ranges, paths, limit)
+		return forestTUI(repo, ranges, paths, limit)
 	}
 
+	format := logFormat
+	if all {
+		// %S attributes each entry to the chain it came from, spelled as
+		// passed — forestRanges passes `jog/<branch>` so the label is short.
+		format = logAllFormat
+	}
 	gitArgs := []string{"log", "--first-parent"}
 	if userFormat != "" {
 		// A caller-supplied format owns the output: no --name-status
@@ -191,6 +212,7 @@ func Log(verb string, args []string) int {
 type snapEntry struct {
 	ID         string     `json:"id"`
 	SHA        string     `json:"sha"`
+	Base       string     `json:"base"` // the HEAD commit the snapshot was based on; "" pre-first-commit
 	Time       string     `json:"time"`
 	Age        string     `json:"age"`
 	Chain      string     `json:"chain"`
@@ -211,9 +233,13 @@ type snapFile struct {
 // fields are fenced by \x1e records and \x1f fields (the body can hold
 // newlines, so line-based parsing would be ambiguous); the --name-status
 // block for a record lands between its terminator and the next record.
-func logJSON(repo *gitx.Repo, ranges, paths []string, limit string) int {
+// boundaries — each chain's root parent — classify the single-parent case:
+// a chain root's one parent is a boundary (its base commit), an unborn-era
+// snapshot's one parent is the previous snapshot (no base). The two are
+// disjoint by construction: boundaries are never jog commits.
+func logJSON(repo *gitx.Repo, ranges []string, boundaries map[string]bool, paths []string, limit string) int {
 	gitArgs := []string{"log", "--first-parent",
-		"--format=%x1e%H%x1f%cI%x1f%cr%x1f%S%x1f%s%x1f%b%x1e", "--name-status"}
+		"--format=%x1e%H%x1f%cI%x1f%cr%x1f%S%x1f%s%x1f%P%x1f%b%x1e", "--name-status"}
 	if limit != "" {
 		gitArgs = append(gitArgs, "-n", limit)
 	}
@@ -232,14 +258,20 @@ func logJSON(repo *gitx.Repo, ranges, paths []string, limit string) int {
 	chunks := strings.Split(out, "\x1e")
 	// chunks alternate: junk, fields, name-status block, fields, block, …
 	for i := 1; i < len(chunks); i += 2 {
-		f := strings.SplitN(chunks[i], "\x1f", 6)
-		if len(f) != 6 {
+		f := strings.SplitN(chunks[i], "\x1f", 7)
+		if len(f) != 7 {
 			continue
 		}
 		e := snapEntry{
 			ID: f[0][:7], SHA: f[0], Time: f[1], Age: f[2],
 			Chain: chainName(f[3]), Provenance: f[4],
-			Note: strings.TrimSpace(f[5]), Files: []snapFile{},
+			Note: strings.TrimSpace(f[6]), Files: []snapFile{},
+		}
+		switch parents := strings.Fields(f[5]); {
+		case len(parents) > 1:
+			e.Base = parents[1]
+		case len(parents) == 1 && boundaries[parents[0]]:
+			e.Base = parents[0] // chain root: parent 1 IS the base commit
 		}
 		if i+1 < len(chunks) {
 			for _, line := range strings.Split(chunks[i+1], "\n") {
@@ -271,33 +303,90 @@ func chainName(s string) string {
 	return strings.TrimPrefix(s, "jog/")
 }
 
-// logTUI is the interactive timeline: the two-frame browser over whole-tree
-// snapshots. r asks y/n before restoring, and a confirmed restore goes
-// through the restore machinery, so it is snapshotted first and undoable
-// like any other.
-func logTUI(repo *gitx.Repo, all bool, ranges, paths []string, limit string) int {
-	items, err := timelineItems(repo, all, ranges, paths, limit)
+// logPiped is the default single-chain output off a TTY: the same rows the
+// browser shows — base column, event rows — printed plainly (lipgloss drops
+// styling when piped) with each snapshot's --name-status block, replacing
+// the old git passthrough, which could not render the base edge or
+// interleave commits.
+func logPiped(repo *gitx.Repo, ref string, paths []string, limit int) int {
+	rows, err := buildTimeline(repo, ref, paths, limit, true)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "jog: %v\n", err)
 		return 1
 	}
-	if len(items) == 0 {
+	var b strings.Builder
+	for _, r := range rows {
+		b.WriteString("\n")
+		if r.kind != rowSnap {
+			b.WriteString(r.markerLabel() + "\n")
+			continue
+		}
+		b.WriteString(r.snapLabel(true) + "\n")
+		if r.body != "" {
+			b.WriteString(r.body + "\n")
+		}
+		if r.files != "" {
+			b.WriteString("\n" + r.files + "\n")
+		}
+	}
+	fmt.Print(b.String())
+	return 0
+}
+
+// chainTUI is the interactive single-chain timeline: the two-frame browser
+// over whole-tree snapshots, with inert commit rows for context. r asks y/n
+// before restoring, and a confirmed restore goes through the restore
+// machinery, so it is snapshotted first and undoable like any other.
+func chainTUI(repo *gitx.Repo, ref string, paths []string, limit int) int {
+	rows, err := buildTimeline(repo, ref, paths, limit, false)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "jog: %v\n", err)
+		return 1
+	}
+	if len(rows) == 0 {
 		// The chain exists (empty chains were handled above); a path
 		// filter left nothing.
 		fmt.Printf("no snapshots touch %s\n", strings.Join(paths, " "))
 		return 0
 	}
-
-	// The footer owns the hotkeys; the title just says where you are.
-	title := "snapshots on every chain"
-	if !all {
-		title = "snapshots on " + strings.TrimPrefix(chainRef(repo), "refs/jog/")
+	items := make([]tui.PickItem, 0, len(rows))
+	for _, r := range rows {
+		if r.kind == rowSnap {
+			// Selectable labels stay byte-plain: the browser's cursor row
+			// is raw reverse video that an embedded reset would cut short.
+			items = append(items, tui.PickItem{ID: r.sha, Label: r.snapLabel(false)})
+		} else {
+			items = append(items, tui.PickItem{ID: r.sha, Label: r.markerLabel(), Inert: true})
+		}
 	}
+	title := "snapshots on " + strings.TrimPrefix(ref, "refs/jog/")
+	return runTimelinePick(repo, title, items, paths)
+}
+
+// forestTUI is the --all browser: every chain's snapshots interleaved by
+// time, each row naming its chain. (Base columns and commit rows are
+// single-chain views for now.)
+func forestTUI(repo *gitx.Repo, ranges, paths []string, limit string) int {
+	items, err := forestItems(repo, ranges, paths, limit)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "jog: %v\n", err)
+		return 1
+	}
+	if len(items) == 0 {
+		fmt.Printf("no snapshots touch %s\n", strings.Join(paths, " "))
+		return 0
+	}
+	return runTimelinePick(repo, "snapshots on every chain", items, paths)
+}
+
+// runTimelinePick runs the browser over prepared items and dispatches a
+// confirmed choice to restore. The footer owns the hotkeys; the title just
+// says where you are.
+func runTimelinePick(repo *gitx.Repo, title string, items []tui.PickItem, paths []string) int {
 	confirm := "restore the whole tree to %s? y/n"
 	if len(paths) > 0 {
 		confirm = fmt.Sprintf("restore %s to %%s? y/n", strings.Join(paths, " "))
 	}
-
 	chosen, aborted, err := tui.RunPick(title, items,
 		func(id string) string { return snapPreview(repo, id, paths) },
 		confirm,
@@ -315,14 +404,10 @@ func logTUI(repo *gitx.Repo, all bool, ranges, paths []string, limit string) int
 	return Restore("restore", []string{"--all", "--at", chosen})
 }
 
-// timelineItems lists the browser's rows — id, age, provenance, plus the
-// chain column with all — over the exact snapshot ranges.
-func timelineItems(repo *gitx.Repo, all bool, ranges, paths []string, limit string) ([]tui.PickItem, error) {
-	format := "--format=%H\x1f%cr\x1f%s"
-	if all {
-		format = "--format=%H\x1f%S\x1f%cr\x1f%s"
-	}
-	gitArgs := append([]string{"log", "--first-parent", format}, ranges...)
+// forestItems lists the --all browser's rows — id, chain, age, provenance —
+// over the exact snapshot ranges.
+func forestItems(repo *gitx.Repo, ranges, paths []string, limit string) ([]tui.PickItem, error) {
+	gitArgs := append([]string{"log", "--first-parent", "--format=%H\x1f%S\x1f%cr\x1f%s"}, ranges...)
 	if limit != "" {
 		gitArgs = append(gitArgs, "-n", limit)
 	}
@@ -337,14 +422,9 @@ func timelineItems(repo *gitx.Repo, all bool, ranges, paths []string, limit stri
 
 	var items []tui.PickItem
 	for _, line := range strings.Split(out, "\n") {
-		f := strings.SplitN(line, "\x1f", 4)
-		switch {
-		case all && len(f) == 4:
+		if f := strings.SplitN(line, "\x1f", 4); len(f) == 4 {
 			items = append(items, tui.PickItem{ID: f[0],
 				Label: fmt.Sprintf("%s  %s  %s  %s", f[0][:7], f[1], f[2], f[3])})
-		case !all && len(f) == 3:
-			items = append(items, tui.PickItem{ID: f[0],
-				Label: fmt.Sprintf("%s  %s  %s", f[0][:7], f[1], f[2])})
 		}
 	}
 	return items, nil
@@ -371,45 +451,47 @@ func snapPreview(repo *gitx.Repo, sha string, paths []string) string {
 // so no walk runs off its oldest snapshot into real history. Multi-tip
 // --first-parent follows each chain's own first-parent line and interleaves
 // by commit date (lab-verified, D13).
-func forestRanges(repo *gitx.Repo) ([]string, error) {
+func forestRanges(repo *gitx.Repo) ([]string, map[string]bool, error) {
 	out, err := repo.RunRead("for-each-ref", "--format=%(refname)", "refs/jog/")
 	if err != nil || out == "" {
-		return nil, err
+		return nil, nil, err
 	}
 	var args []string
 	var bounds []string
+	boundaries := map[string]bool{}
 	for _, ref := range strings.Split(out, "\n") {
 		if strings.HasPrefix(ref, "refs/jog/@trash/") {
 			continue // trim's insurance refs are not chains
 		}
 		boundary, err := chainBoundary(repo, ref)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		args = append(args, "jog/"+strings.TrimPrefix(ref, "refs/jog/"))
 		if boundary != "" {
 			bounds = append(bounds, "^"+boundary)
+			boundaries[boundary] = true
 		}
 	}
-	return append(args, bounds...), nil
+	return append(args, bounds...), boundaries, nil
 }
 
-// chainRange resolves the current chain ref and the git range covering
-// exactly its snapshots — `boundary..ref` (see chainBoundary).
-func chainRange(repo *gitx.Repo) (ref, rng string, exists bool, err error) {
+// chainRange resolves the current chain ref, the git range covering exactly
+// its snapshots — `boundary..ref` — and the boundary itself (see
+// chainBoundary).
+func chainRange(repo *gitx.Repo) (ref, rng, boundary string, exists bool, err error) {
 	ref = chainRef(repo)
 	if _, verr := repo.RunRead("rev-parse", "-q", "--verify", ref); verr != nil {
-		return ref, "", false, nil
+		return ref, "", "", false, nil
 	}
-	boundary, err := chainBoundary(repo, ref)
-	if err != nil {
-		return "", "", false, err
+	if boundary, err = chainBoundary(repo, ref); err != nil {
+		return "", "", "", false, err
 	}
 	rng = ref
 	if boundary != "" {
 		rng = boundary + ".." + ref
 	}
-	return ref, rng, true, nil
+	return ref, rng, boundary, true, nil
 }
 
 // chainBoundary finds where a chain's snapshots end and real history begins.
@@ -448,15 +530,20 @@ func chainRef(repo *gitx.Repo) string {
 }
 
 // recentEntries returns the newest n timeline lines, for the bare-`jog`
-// readout (D6).
+// readout (D6) — the same rows the log renders: base columns, and any
+// commit rows that fall inside the window ride along free of the count.
 func recentEntries(repo *gitx.Repo, n int) []string {
-	_, rng, exists, err := chainRange(repo)
-	if err != nil || !exists {
+	rows, err := buildTimeline(repo, chainRef(repo), nil, n, false)
+	if err != nil {
 		return nil
 	}
-	out, err := repo.RunRead("log", "--first-parent", "-n", fmt.Sprint(n), "--format=%h  %cr  %s", rng)
-	if err != nil || out == "" {
-		return nil
+	var lines []string
+	for _, r := range rows {
+		if r.kind == rowSnap {
+			lines = append(lines, r.snapLabel(true))
+		} else {
+			lines = append(lines, r.markerLabel())
+		}
 	}
-	return strings.Split(out, "\n")
+	return lines
 }

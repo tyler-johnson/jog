@@ -15,9 +15,9 @@ stored as ordinary git objects. No daemon, no new VCS, no workflow change.*
 $ rm -rf src/parser        # oops. uncommitted changes and untracked files, gone.
 
 $ jog log                  # ...but every command boundary was snapshotted
-c0ffee1  2 minutes ago   pre: git status
-a1b2c3d  9 minutes ago   claude[b3f1a2c4]: Bash(go test ./...)
-9e8d7c6  14 minutes ago  manual: before parser rewrite
+c0ffee1  deadbee  2 minutes ago   pre: git status
+a1b2c3d  deadbee  9 minutes ago   claude[b3f1a2c4]: Bash(go test ./...)
+9e8d7c6  deadbee  14 minutes ago  manual: before parser rewrite
 
 $ jog restore --all        # worktree back to the newest snapshot
 restored to c0ffee1 (2 minutes ago — pre: git status): 14 restored, 0 deleted
@@ -132,7 +132,7 @@ $ git status             # through the alias — snapshots first
 $ jog
 no changes since the last snapshot on main
 
-  c0ffee1  9 seconds ago  pre: git status
+  c0ffee1  deadbee  9 seconds ago  pre: git status
 ```
 
 ## Recovery cookbook
@@ -140,13 +140,17 @@ no changes since the last snapshot on main
 `jog log` browses this branch's timeline. In a terminal it's an
 interactive browser — scrub with a live diff preview to find the
 version where things still worked, and press `r` to restore right
-there.
+there. Each snapshot names the commit it was based on (the dim second
+column), and `●` rows mark where a commit, rebase, or reset moved
+HEAD — the same short ids you see in `git log`, so the two timelines
+cross-reference.
 
 ```console
 $ jog log
-c0ffee1  2 minutes ago   pre: git status
-a1b2c3d  9 minutes ago   claude[b3f1a2c4]: Bash(go test ./...)
-9e8d7c6  14 minutes ago  manual: before parser rewrite
+c0ffee1  deadbee  2 minutes ago   pre: git status
+a1b2c3d  deadbee  9 minutes ago   claude[b3f1a2c4]: Bash(go test ./...)
+● deadbee  commit: parser groundwork — 12 minutes ago
+9e8d7c6  4f5e6d7  14 minutes ago  manual: before parser rewrite
 ```
 
 ### Other ways of locating a snapshot
@@ -208,9 +212,13 @@ jog -m "before parser rewrite"   # labeled: manual: before parser rewrite
 
 Browse the timeline of snapshots on this branch. In a terminal it's an
 interactive browser — scrub with a live diff preview, press `r` to
-restore after a y/n confirm. Piped, it prints plainly: id, age,
-provenance, files changed. With paths, browsing and restoring are
-scoped to those paths.
+restore after a y/n confirm. Piped, it prints plainly: id, the commit
+the snapshot was based on, age, provenance, files changed. Rows marked
+`●` are commits interleaved where they happened — commit, rebase, and
+reset boundaries named with the same ids as `git log`. With paths,
+browsing and restoring are scoped to those paths. (`--json` carries
+the base commit as `base`; `-p`, `--format`, and `--all` output are
+unchanged.)
 
 ```sh
 jog log                   # this branch's timeline

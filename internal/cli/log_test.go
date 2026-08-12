@@ -10,11 +10,10 @@ import (
 	"github.com/tyler-johnson/jog/internal/testrepo"
 )
 
-// TestTimelineItems covers matrix row 31's data layer, now shared by the
-// log browser: path-filtered rows are exactly the chain snapshots that
-// changed the path, newest first, and previews render the change (a
-// chain-root version shows as an addition).
-func TestTimelineItems(t *testing.T) {
+// TestSnapPreview covers matrix row 31's preview layer: the browser's
+// preview renders a snapshot's parent-1 change, path-scoped. (The row data
+// layer — path filtering, -n, bases, event rows — is TestBuildTimeline*.)
+func TestSnapPreview(t *testing.T) {
 	tr := testrepo.New(t)
 	tr.Write("f.txt", "v1\n")
 	tr.Commit("base")
@@ -23,44 +22,19 @@ func TestTimelineItems(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	take := func(msg string) string {
-		res, err := snap.Take(repo, provenance.Manual(msg))
-		if err != nil {
-			t.Fatal(err)
-		}
-		return res.Commit
-	}
 	tr.Write("f.txt", "v2\n")
-	s1 := take("second version")
-	tr.Write("g.txt", "unrelated\n")
-	take("does not touch f")
+	if _, err := snap.Take(repo, provenance.Manual("second version")); err != nil {
+		t.Fatal(err)
+	}
 	tr.Write("f.txt", "v3\n")
-	s3 := take("third version")
-
-	_, rng, exists, err := chainRange(repo)
-	if err != nil || !exists {
-		t.Fatalf("chainRange: exists=%v err=%v", exists, err)
-	}
-	items, err := timelineItems(repo, false, []string{rng}, []string{"f.txt"}, "")
+	res, err := snap.Take(repo, provenance.Manual("third version"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(items) != 2 || items[0].ID != s3 || items[1].ID != s1 {
-		t.Fatalf("timelineItems: want [%s %s], got %+v", s3[:7], s1[:7], items)
-	}
 
-	// -n narrows to the newest.
-	items, err = timelineItems(repo, false, []string{rng}, nil, "1")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(items) != 1 || items[0].ID != s3 {
-		t.Fatalf("timelineItems -n 1: want [%s], got %+v", s3[:7], items)
-	}
-
-	p := stripANSI(snapPreview(repo, s3, []string{"f.txt"}))
+	p := stripANSI(snapPreview(repo, res.Commit, []string{"f.txt"}))
 	if !strings.Contains(p, "-v2") || !strings.Contains(p, "+v3") {
-		t.Errorf("preview of %s missing the change:\n%s", s3[:7], p)
+		t.Errorf("preview of %s missing the change:\n%s", res.Commit[:7], p)
 	}
 }
 

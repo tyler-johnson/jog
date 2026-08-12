@@ -152,9 +152,13 @@ func TestBareJogSnapshots(t *testing.T) {
 	if !strings.Contains(stdout, "snapshot ") || !strings.Contains(stdout, " on main") {
 		t.Errorf("stdout = %q", stdout)
 	}
-	// D6: after snapshotting, bare jog shows the top of the timeline.
+	// D6: after snapshotting, bare jog shows the top of the timeline —
+	// including the base column naming the commit the snapshot hangs off.
 	if !strings.Contains(stdout, "ago  manual") {
 		t.Errorf("bare jog missing recent-timeline readout: %q", stdout)
+	}
+	if base := tr.Git("rev-parse", "--short", "HEAD"); !strings.Contains(stdout, "  "+base+"  ") {
+		t.Errorf("bare jog readout missing base column %s: %q", base, stdout)
 	}
 	if got := tr.Git("log", "-1", "--format=%s", "refs/jog/main"); got != "manual" {
 		t.Errorf("provenance = %q, want manual", got)
@@ -497,20 +501,46 @@ func TestLog(t *testing.T) {
 		t.Errorf("files-changed detail missing:\n%s", stdout)
 	}
 	// Row 16: the first-parent walk must stop at the chain boundary, not
-	// run into real history.
-	if strings.Contains(stdout, "real history commit") {
-		t.Errorf("timeline walked into real history:\n%s", stdout)
+	// run into real history — the boundary commit itself appears exactly
+	// once, as the ● anchor row the chain grew from.
+	if n := strings.Count(stdout, "real history commit"); n != 1 {
+		t.Errorf("boundary commit should appear once (anchor row), got %d:\n%s", n, stdout)
+	}
+	if !strings.Contains(stdout, "● "+tr.Git("rev-parse", "--short", "HEAD")+"  real history commit") {
+		t.Errorf("anchor row missing or misshapen:\n%s", stdout)
 	}
 	if strings.Index(stdout, "checkpoint two") > strings.Index(stdout, "checkpoint one") {
 		t.Errorf("timeline not newest-first:\n%s", stdout)
 	}
-	// Piped output stays the plain git log passthrough — ids and provenance
-	// with no ANSI styling; the interactive browser only appears on a TTY.
+	// Every snapshot row carries the commit it was based on.
+	base := tr.Git("rev-parse", "--short", "HEAD")
+	for _, want := range []string{"manual: checkpoint one", "manual: checkpoint two"} {
+		for _, line := range strings.Split(stdout, "\n") {
+			if strings.Contains(line, want) && !strings.Contains(line, base) {
+				t.Errorf("snapshot row missing base %s: %q", base, line)
+			}
+		}
+	}
+	// Piped output is plain rows — ids and provenance with no ANSI
+	// styling; the interactive browser only appears on a TTY.
 	if strings.Contains(stdout, "\x1b[") {
 		t.Errorf("piped log output carries ANSI escapes:\n%s", stdout)
 	}
 	if id := tr.Git("rev-parse", "--short", "refs/jog/main"); !strings.Contains(stdout, id) {
 		t.Errorf("piped log output missing snapshot id %s:\n%s", id, stdout)
+	}
+
+	// A commit between snapshots surfaces as an event row between their
+	// timeline entries, labeled by the reflog.
+	tr.Commit("second real commit")
+	tr.Write("c.txt", "more\n")
+	runJog(t, tr.Dir, "-m", "checkpoint three")
+	stdout, _, _ = runJog(t, tr.Dir, "log")
+	iThree := strings.Index(stdout, "checkpoint three")
+	iEvent := strings.Index(stdout, "commit: second real commit")
+	iTwo := strings.Index(stdout, "checkpoint two")
+	if iThree == -1 || iEvent == -1 || iTwo == -1 || !(iThree < iEvent && iEvent < iTwo) {
+		t.Errorf("event row misplaced (three=%d event=%d two=%d):\n%s", iThree, iEvent, iTwo, stdout)
 	}
 
 	// Path filter: only entries touching b.txt.
@@ -552,8 +582,8 @@ func TestLogMachineOutput(t *testing.T) {
 		t.Fatalf("log --json exited %d: %s", code, stderr)
 	}
 	var entries []struct {
-		ID, SHA, Time, Age, Chain, Provenance string
-		Files                                 []struct{ Status, Path string }
+		ID, SHA, Base, Time, Age, Chain, Provenance string
+		Files                                       []struct{ Status, Path string }
 	}
 	if err := json.Unmarshal([]byte(stdout), &entries); err != nil {
 		t.Fatalf("log --json is not valid JSON: %v\n%s", err, stdout)
@@ -573,6 +603,24 @@ func TestLogMachineOutput(t *testing.T) {
 	}
 	if f := entries[1].Files; len(f) != 1 || f[0].Status != "M" || f[0].Path != "a.txt" {
 		t.Errorf("oldest entry files = %+v, want [{M a.txt}]", f)
+	}
+	// Every entry names the commit it was based on: the newest via its base
+	// edge (parent 2), the chain root via its single parent — same sha here.
+	if baseSha := tr.Git("rev-parse", "HEAD"); entries[0].Base != baseSha || entries[1].Base != baseSha {
+		t.Errorf("bases = %.7s %.7s, want both %.7s", entries[0].Base, entries[1].Base, baseSha)
+	}
+
+	// Unborn-era snapshots (no commit yet) have no base — empty, not absent.
+	tr2 := testrepo.New(t)
+	tr2.Write("x.txt", "one\n")
+	runJog(t, tr2.Dir, "-m", "before first commit")
+	stdout, _, _ = runJog(t, tr2.Dir, "log", "--json")
+	var unborn []struct{ Base *string }
+	if err := json.Unmarshal([]byte(stdout), &unborn); err != nil {
+		t.Fatalf("unborn log --json: %v\n%s", err, stdout)
+	}
+	if len(unborn) != 1 || unborn[0].Base == nil || *unborn[0].Base != "" {
+		t.Errorf("unborn entry base wrong: %+v\n%s", unborn, stdout)
 	}
 
 	// -n limits, and an empty result is an empty array, not prose.
@@ -807,6 +855,11 @@ func TestLogAll(t *testing.T) {
 	}
 	if strings.Contains(stdout, "real history commit") {
 		t.Errorf("forest view leaked real history past a chain boundary:\n%s", stdout)
+	}
+	// Base columns and commit rows are single-chain views for now — the
+	// forest passthrough stays event-free.
+	if strings.Contains(stdout, "●") {
+		t.Errorf("forest view grew event rows (deferred feature):\n%s", stdout)
 	}
 }
 

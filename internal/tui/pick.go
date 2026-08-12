@@ -12,10 +12,13 @@ import (
 	"github.com/charmbracelet/x/ansi"
 )
 
-// PickItem is one selectable row.
+// PickItem is one row. Inert rows are context markers (commit boundaries
+// on the timeline): rendered in place, but the cursor skips over them and
+// they can never be chosen or previewed.
 type PickItem struct {
 	ID    string
 	Label string
+	Inert bool
 }
 
 // The full-screen frame: title above, footer below, and between them two
@@ -78,7 +81,20 @@ type pickModel struct {
 
 func (m *pickModel) Init() tea.Cmd {
 	m.chosen = -1
+	m.cursor = firstSelectable(m.items)
 	return nil
+}
+
+// firstSelectable is where the cursor starts: the newest row that can
+// actually be chosen (an event row may sit above it). 0 when nothing is
+// selectable — the choose paths guard against inert independently.
+func firstSelectable(items []PickItem) int {
+	for i, it := range items {
+		if !it.Inert {
+			return i
+		}
+	}
+	return 0
 }
 
 func (m *pickModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -90,7 +106,9 @@ func (m *pickModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Only an explicit y commits; every other key is a safe no.
 			switch msg.String() {
 			case "y", "Y":
-				m.chosen = m.cursor
+				if !m.items[m.cursor].Inert { // unreachable guard: r won't confirm on inert
+					m.chosen = m.cursor
+				}
 				return m, tea.Quit
 			case "ctrl+c":
 				return m, tea.Quit
@@ -103,16 +121,14 @@ func (m *pickModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "up", "k":
 			if m.focusDiff {
 				m.scroll(-1)
-			} else if m.cursor > 0 {
-				m.cursor--
-				m.offset = 0
+			} else {
+				m.step(-1)
 			}
 		case "down", "j":
 			if m.focusDiff {
 				m.scroll(1)
-			} else if m.cursor < len(m.items)-1 {
-				m.cursor++
-				m.offset = 0
+			} else {
+				m.step(1)
 			}
 		case "pgdown", "ctrl+d":
 			if m.focusDiff {
@@ -135,6 +151,9 @@ func (m *pickModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, tea.Quit
 			}
 		case "r":
+			if len(m.items) == 0 || m.items[m.cursor].Inert {
+				return m, nil
+			}
 			if m.confirm != "" {
 				m.confirming = true
 				return m, nil
@@ -193,9 +212,11 @@ func (m *pickModel) View() string {
 	case m.confirming:
 		footer = styleAsk.Render(ansi.Truncate(fmt.Sprintf(m.confirm, shortID(m.items[m.cursor].ID)), m.width, "…"))
 	case m.focusDiff:
-		footer = styleFooter.Render(ansi.Truncate(fmt.Sprintf("%d/%d  %s · r restore · q quit", m.cursor+1, len(m.items), keysDiff), m.width, "…"))
+		rank, count := m.selPos()
+		footer = styleFooter.Render(ansi.Truncate(fmt.Sprintf("%d/%d  %s · r restore · q quit", rank, count, keysDiff), m.width, "…"))
 	default:
-		footer = styleFooter.Render(ansi.Truncate(fmt.Sprintf("%d/%d  %s · r restore · q quit", m.cursor+1, len(m.items), keysList), m.width, "…"))
+		rank, count := m.selPos()
+		footer = styleFooter.Render(ansi.Truncate(fmt.Sprintf("%d/%d  %s · r restore · q quit", rank, count, keysList), m.width, "…"))
 	}
 
 	title := styleTitle.Render(ansi.Truncate(m.title, m.width, "…"))
@@ -255,6 +276,9 @@ func (m *pickModel) layout() (listH, previewH int) {
 // the width math says, the line wraps, and every row below it is drawn
 // one row off until the next full repaint.
 func (m *pickModel) previewLines() []string {
+	if len(m.items) == 0 || m.items[m.cursor].Inert {
+		return []string{""} // unreachable in practice: the cursor never rests on inert
+	}
 	p, ok := m.cache[m.cursor]
 	if !ok {
 		// \r would send the cursor to column 0 mid-line (CRLF files).
@@ -274,18 +298,65 @@ func (m *pickModel) listH() int {
 	return listH
 }
 
-// jump moves the list cursor by a page-sized delta, clamped to the ends.
+// step moves the list cursor one selectable row in dir (±1), hopping over
+// inert rows; at an edge with only inert rows beyond, the cursor stays.
+func (m *pickModel) step(dir int) {
+	for i := m.cursor + dir; i >= 0 && i < len(m.items); i += dir {
+		if !m.items[i].Inert {
+			m.cursor = i
+			m.offset = 0
+			return
+		}
+	}
+}
+
+// jump moves the list cursor by a page-sized delta, clamped to the ends;
+// an inert landing slides on in the jump's direction (back toward the
+// start as the fallback) so the cursor always rests on a selectable row.
 func (m *pickModel) jump(delta int) {
 	if len(m.items) == 0 {
 		return
 	}
-	m.cursor = max(0, min(m.cursor+delta, len(m.items)-1))
-	m.offset = 0
+	dir := 1
+	if delta < 0 {
+		dir = -1
+	}
+	land := max(0, min(m.cursor+delta, len(m.items)-1))
+	for i := land; i >= 0 && i < len(m.items); i += dir {
+		if !m.items[i].Inert {
+			m.cursor = i
+			m.offset = 0
+			return
+		}
+	}
+	for i := land; i >= 0 && i < len(m.items); i -= dir {
+		if !m.items[i].Inert {
+			m.cursor = i
+			m.offset = 0
+			return
+		}
+	}
 }
 
 func (m *pickModel) scroll(delta int) {
 	maxOff := max(0, len(m.previewLines())-m.previewH())
 	m.offset = max(0, min(m.offset+delta, maxOff))
+}
+
+// selPos is the footer's position readout counted over selectable rows
+// only, so "3/7" means the 3rd of 7 snapshots regardless of how many
+// inert marker rows sit between them.
+func (m *pickModel) selPos() (rank, count int) {
+	for i, it := range m.items {
+		if it.Inert {
+			continue
+		}
+		count++
+		if i == m.cursor {
+			rank = count
+		}
+	}
+	return
 }
 
 func shortID(id string) string {
