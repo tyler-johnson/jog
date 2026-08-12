@@ -83,15 +83,8 @@ curl -fsSL https://raw.githubusercontent.com/tyler-johnson/jog/main/install.sh |
 irm https://raw.githubusercontent.com/tyler-johnson/jog/main/install.ps1 | iex
 ```
 
-The script ends by launching `jog install` — the guided setup that
-wires jog's trigger surfaces, one question each: your shell (the git
-alias and the preexec hook), hooks + a skill for every agent client on
-this machine, and a post-save hook per detected editor. Every yes runs
-the same installer the standalone commands run — the [Shell](#shell),
-[Agents](#agents), and [Editors](#editors) sections below have the full
-picture — and `jog uninstall` reverses all of it. Re-running
-`jog install` is always safe; `--yes` takes every default without
-asking.
+The script ends by launching `jog install` — the guided setup described
+below.
 
 Script installs also **keep themselves up to date**: jog checks for new
 releases daily in the background and installs them silently — install
@@ -115,8 +108,17 @@ go installs update through their own tools (`brew upgrade jog` /
 `go install …@latest`) — jog prints a one-line notice when a new release
 exists and says which command applies.
 
-However jog got onto the machine, finish by running `jog install` — the
-same guided setup the script launches.
+However jog got onto the machine, finish by running `jog install` — a
+few questions that wire up your shell, agents, and editors (the
+[Hooks](#hooks) section has the full picture). Re-running it is always
+safe, and `jog uninstall` reverses it. Flags answer the questions for
+dotfiles, CI, or a coding agent doing the setup for you:
+
+```sh
+jog install                                   # guided setup
+jog install --yes                             # every default, no questions
+jog install --yes --preexec --agents claude   # scoped; see `jog help install`
+```
 
 ### Verify
 
