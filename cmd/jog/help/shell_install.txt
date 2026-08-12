@@ -1,23 +1,25 @@
-jog shell install — add the git alias and preexec hook to your shell
+jog shell install — add the git alias (and preexec hook) to your shell
 
 usage:
-  jog shell install [--no-alias|--no-preexec] [<shell>…]
+  jog shell install [--preexec] [--no-alias] [<shell>…]
 
-Appends two marked lines to the shell's rc file, creating the file if
-needed: the alias — `alias git='jog git'` (PowerShell: a git function)
-— and the preexec hook — one line calling `jog shell-hook` before every
-interactive command. With no names it targets your login shell ($SHELL;
-PowerShell on Windows); name shells to wire others, rc file or not. A
-line you added by hand is recognized and left alone.
+Appends the alias — `alias git='jog git'` (PowerShell: a git function)
+— as one marked line in the shell's rc file, creating the file if
+needed. With no names it targets your login shell ($SHELL; PowerShell
+on Windows); name shells to wire others, rc file or not. A line you
+added by hand is recognized and left alone.
 
---no-alias installs only the preexec hook; --no-preexec only the alias.
-Both lines guard on jog existing, so a removed binary never breaks your
-prompt.
+--preexec also installs the preexec hook: a second marked line calling
+`jog shell-hook` before every interactive command, so `rm`, `sed -i`,
+and `make clean` are covered too — not just git. It is opt-in because
+hooking every command is a bigger ask than an alias. --no-alias (with
+--preexec) installs the hook alone. Both lines guard on jog existing,
+so a removed binary never breaks your prompt.
 
 Takes effect in new shells; source the rc file to get it in this one.
-The bash line uses PS0 (bash 4.4+) — older bash ignores it harmlessly,
+The bash hook uses PS0 (bash 4.4+) — older bash ignores it harmlessly,
 as does `shopt -u promptvars`. Re-sourcing an rc file registers the
-hook twice; the second fire is a no-op. The cost is one no-op jog run
-per command inside a repo, near-zero outside.
+hook twice; the second fire is a no-op. The hook costs one no-op jog
+run per command inside a repo, near-zero outside.
 
 supported: bash, zsh, fish, powershell (alias only — no preexec mechanism)

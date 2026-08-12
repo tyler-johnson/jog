@@ -370,7 +370,7 @@ func (d *doctor) checkTriggers() {
 	case preexecFile != "":
 		d.info("preexec", "`jog shell-hook` found in "+preexecFile+" (heuristic — wired by hand)")
 	default:
-		d.info("preexec", "no preexec hook in shell rc files — `jog shell install` adds it (snapshots before every command, not just git)")
+		d.info("preexec", "no preexec hook in shell rc files — `jog shell install --preexec` adds it (snapshots before every command, not just git)")
 	}
 
 	if !hooks && aliasFile == "" && preexecFile == "" {

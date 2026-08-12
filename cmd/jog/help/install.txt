@@ -12,7 +12,8 @@ standalone command runs — nothing here is reachable only through the
 wizard, and everything is additive and idempotent: re-running is
 always safe.
 
---yes takes every default without asking (login-shell alias and preexec
-hook, detected agents, detected editors) — for scripts and dotfiles.
+--yes takes every default without asking (login-shell alias, detected
+agents, detected editors; the preexec hook defaults to no — it is only
+ever wired on an explicit yes) — for scripts and dotfiles.
 
 `jog uninstall` reverses all of it; `jog doctor` verifies the wiring.

@@ -4,18 +4,19 @@ usage:
   jog shell <command> [<args>]
 
 commands:
-  install    add the alias and preexec hook to a shell's rc file
+  install    add the alias to a shell's rc file (--preexec: the hook too)
   uninstall  remove jog's lines from rc files
   list       every supported shell and what is installed
 
-Two lines cover your interactive work, both installed by default:
+Two lines cover your interactive work:
 
   alias    `alias git='jog git'` — snapshots before every git command
-           you type
+           you type. The standard install.
   preexec  one line calling `jog shell-hook` before each command —
            snapshots before everything else too: `rm`, `sed -i`,
            `make clean` (bash 4.4+, zsh, fish; PowerShell has no
-           preexec mechanism and gets the alias only)
+           preexec mechanism and gets the alias only). Opt in with
+           `jog shell install --preexec`.
 
 On a git command both fire; the second snapshot is a no-op. Scripts,
 IDEs, and CI are untouched: they resolve git on PATH and get real git,

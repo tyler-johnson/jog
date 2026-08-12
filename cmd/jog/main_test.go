@@ -2373,20 +2373,17 @@ func loginPreexecLine() string {
 const bashPreexecMarked = `PS0='$(command -v jog >/dev/null && jog shell-hook --history -- "$(HISTTIMEFORMAT= builtin history 1)")'"$PS0"` +
 	" # jog preexec — added by `jog shell install`"
 
-// TestShell covers `jog shell`: the two marked lines (alias + preexec)
-// in rc files — login-shell default, forcing by name, --no-alias /
-// --no-preexec scoping, hand-added lines left alone, and surgical
-// uninstall.
+// TestShell covers `jog shell`: the two marked lines in rc files — the
+// alias by default, the preexec hook behind --preexec, --no-alias
+// scoping, hand-added lines left alone, and surgical uninstall.
 func TestShell(t *testing.T) {
 	home := t.TempDir()
 	env := append(fakeHome(home), "SHELL=/bin/zsh")
 	loginName, loginRC, loginDisplay, markedLine := loginShellFixture(home)
 	preexecLine := loginPreexecLine()
 
-	// No names: the login shell is the target, the rc file is created
-	// when missing, and BOTH surfaces land. (On Windows the login shell
-	// is PowerShell: the alias installs, preexec reports not supported,
-	// exit stays 0.)
+	// No names, no flags: the login shell gets the alias ONLY — the
+	// preexec hook is opt-in, never wired silently.
 	stdout, _, code := runJogEnv(t, home, env, "shell", "install")
 	if code != 0 || !strings.Contains(stdout, "installed — "+loginDisplay) {
 		t.Fatalf("shell install: code=%d\n%s", code, stdout)
@@ -2395,6 +2392,21 @@ func TestShell(t *testing.T) {
 	if !strings.Contains(b, markedLine) {
 		t.Errorf("login rc missing the marked alias line:\n%s", b)
 	}
+	if strings.Contains(b, "jog shell-hook") {
+		t.Errorf("bare install must not wire the preexec hook:\n%s", b)
+	}
+	// The alias-only install advertises the opt-in.
+	if !strings.Contains(stdout, "--preexec") {
+		t.Errorf("alias-only install should mention --preexec:\n%s", stdout)
+	}
+
+	// --preexec adds the hook. (On Windows the login shell is
+	// PowerShell: preexec reports not supported, exit stays 0.)
+	stdout, _, code = runJogEnv(t, home, env, "shell", "install", "--preexec")
+	if code != 0 {
+		t.Fatalf("install --preexec: code=%d\n%s", code, stdout)
+	}
+	b = string(mustRead(t, loginRC))
 	if preexecLine != "" {
 		if !strings.Contains(b, preexecLine) {
 			t.Errorf("login rc missing the marked preexec line:\n%s", b)
@@ -2404,14 +2416,23 @@ func TestShell(t *testing.T) {
 	}
 
 	// Idempotent — per surface.
-	stdout, _, code = runJogEnv(t, home, env, "shell", "install")
+	stdout, _, code = runJogEnv(t, home, env, "shell", "install", "--preexec")
 	if code != 0 || !strings.Contains(stdout, "already installed") {
 		t.Errorf("re-install: code=%d\n%s", code, stdout)
 	}
 
-	// Opting out of both surfaces is a usage error.
-	if _, stderr, code := runJogEnv(t, home, env, "shell", "install", "--no-alias", "--no-preexec"); code != 2 || !strings.Contains(stderr, "usage") {
-		t.Errorf("both flags: code=%d %q", code, stderr)
+	// Flag misuse is a usage error: install with nothing left to do,
+	// install spelling the default as the removed --no-preexec, and
+	// uninstall with install's opt-in flag.
+	for _, bad := range [][]string{
+		{"shell", "install", "--no-alias"},
+		{"shell", "install", "--no-preexec"},
+		{"shell", "uninstall", "--preexec"},
+		{"shell", "uninstall", "--no-alias", "--no-preexec"},
+	} {
+		if _, stderr, code := runJogEnv(t, home, env, bad...); code != 2 || !strings.Contains(stderr, "usage") {
+			t.Errorf("%v: code=%d %q", bad, code, stderr)
+		}
 	}
 
 	// Named shells force, whatever the login shell is; existing content
@@ -2421,7 +2442,7 @@ func TestShell(t *testing.T) {
 	if err := os.WriteFile(bashrc, []byte("export FOO=1\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	stdout, _, code = runJogEnv(t, home, env, "shell", "install", "bash", "fish")
+	stdout, _, code = runJogEnv(t, home, env, "shell", "install", "--preexec", "bash", "fish")
 	if code != 0 || !strings.Contains(stdout, ".bashrc") || !strings.Contains(stdout, "config.fish") {
 		t.Fatalf("forced install: code=%d\n%s", code, stdout)
 	}
@@ -2451,7 +2472,7 @@ func TestShell(t *testing.T) {
 	if b := string(mustRead(t, bashrc)); !strings.Contains(b, bashMarked) || strings.Contains(b, "jog shell-hook") {
 		t.Errorf("scoped uninstall touched the alias:\n%s", b)
 	}
-	stdout, _, code = runJogEnv(t, home, env, "shell", "install", "--no-alias", "bash")
+	stdout, _, code = runJogEnv(t, home, env, "shell", "install", "--preexec", "--no-alias", "bash")
 	if code != 0 || !strings.Contains(stdout, "installed — ") {
 		t.Fatalf("scoped reinstall: code=%d\n%s", code, stdout)
 	}
@@ -2475,9 +2496,9 @@ func TestShell(t *testing.T) {
 		}
 	}
 
-	// PowerShell by name: the alias wires; the preexec row reports not
-	// supported and the exit code stays 0.
-	stdout, _, code = runJogEnv(t, home, env, "shell", "install", "powershell")
+	// PowerShell by name with --preexec: the alias wires; the preexec
+	// row reports not supported and the exit code stays 0.
+	stdout, _, code = runJogEnv(t, home, env, "shell", "install", "--preexec", "powershell")
 	if code != 0 || !strings.Contains(stdout, "not supported") || !strings.Contains(stdout, "installed") {
 		t.Errorf("powershell install: code=%d\n%s", code, stdout)
 	}
@@ -2494,7 +2515,7 @@ func TestShell(t *testing.T) {
 	if err := os.WriteFile(loginRC, []byte(hand), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	stdout, _, code = runJogEnv(t, home, env, "shell", "install", "--no-preexec")
+	stdout, _, code = runJogEnv(t, home, env, "shell", "install")
 	if code != 0 || !strings.Contains(stdout, "by hand") {
 		t.Errorf("hand-added install: code=%d\n%s", code, stdout)
 	}
@@ -2512,7 +2533,7 @@ func TestShell(t *testing.T) {
 	if err := os.WriteFile(bashrc, []byte(handHook), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	stdout, _, code = runJogEnv(t, home, env, "shell", "install", "--no-alias", "bash")
+	stdout, _, code = runJogEnv(t, home, env, "shell", "install", "--preexec", "--no-alias", "bash")
 	if code != 0 || !strings.Contains(stdout, "wired by hand") {
 		t.Errorf("hand-wired install: code=%d\n%s", code, stdout)
 	}
@@ -2713,7 +2734,9 @@ func TestInstallInteractive(t *testing.T) {
 		}
 	}
 
-	// --yes: no stdin at all, every default taken — BOTH shell lines land.
+	// --yes: no stdin at all, every default taken — the alias lands, the
+	// preexec hook does NOT: it defaults to no, wired only on an
+	// explicit yes.
 	home4, env4 := newHome()
 	_, loginRC4, _, markedLine4 := loginShellFixture(home4)
 	stdout, _, code = runJogEnvStdin(t, home4, env4, "", "install", "--yes")
@@ -2721,8 +2744,8 @@ func TestInstallInteractive(t *testing.T) {
 		t.Fatalf("install --yes: code=%d\n%s", code, stdout)
 	}
 	if b := string(mustRead(t, loginRC4)); !strings.Contains(b, markedLine4) ||
-		(preexecLine != "" && !strings.Contains(b, preexecLine)) {
-		t.Errorf("--yes rc missing a marked line:\n%s", b)
+		strings.Contains(b, "jog shell-hook") {
+		t.Errorf("--yes must wire the alias and only the alias:\n%s", b)
 	}
 	if _, err := os.Stat(filepath.Join(home4, ".claude", "settings.json")); err != nil {
 		t.Errorf("--yes skipped agents: %v", err)
@@ -2750,6 +2773,11 @@ func TestUninstallCommand(t *testing.T) {
 	_, loginRC, _, _ := loginShellFixture(home)
 	if stdout, _, code := runJogEnvStdin(t, home, env, "", "install", "--yes"); code != 0 {
 		t.Fatalf("seed install: code=%d\n%s", code, stdout)
+	}
+	// --yes stays alias-only, so opt the preexec hook in separately —
+	// uninstall must sweep it all the same.
+	if stdout, _, code := runJogEnv(t, home, env, "shell", "install", "--preexec", "--no-alias"); code != 0 {
+		t.Fatalf("seed preexec: code=%d\n%s", code, stdout)
 	}
 
 	// Declined: everything stays. The summary names both shell surfaces

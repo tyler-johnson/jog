@@ -95,11 +95,14 @@ func Install(args []string) int {
 		} else {
 			aliasWant, aliasNew = answer, answer
 		}
+		// Default No: hooking every command is a bigger ask than an
+		// alias — it is wired only on an explicit yes, so --yes stays
+		// alias-only.
 		if !aborted && st.Preexec != "" {
 			if st.PreexecInstalled || st.PreexecByHand {
 				note(st.Name + " already has the preexec hook (" + st.RC + ")")
 				preexecWant = true
-			} else if answer, ok := ask("also snapshot before every command, not just git? (preexec hook in "+st.RC+")", true); !ok {
+			} else if answer, ok := ask("also snapshot before every command, not just git? (preexec hook in "+st.RC+")", false); !ok {
 				aborted = true
 			} else {
 				preexecWant, preexecNew = answer, answer
@@ -192,14 +195,15 @@ func Install(args []string) int {
 }
 
 // shellInstallArgs scopes `jog shell install` to the surfaces the user
-// said yes to.
+// said yes to. The alias is install's default; --preexec opts the hook
+// in, --no-alias scopes to it alone.
 func shellInstallArgs(alias, preexec bool, name string) []string {
 	args := []string{"install"}
+	if preexec {
+		args = append(args, "--preexec")
+	}
 	if !alias {
 		args = append(args, "--no-alias")
-	}
-	if !preexec {
-		args = append(args, "--no-preexec")
 	}
 	return append(args, name)
 }

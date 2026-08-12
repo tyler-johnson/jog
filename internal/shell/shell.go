@@ -1,17 +1,19 @@
 // Package shell implements `jog shell` — install, uninstall, and list
 // jog's two lines in shell rc files (bash, zsh, fish, PowerShell).
 //
-// Two surfaces, one marked line each, installed together by default:
+// Two surfaces, one marked line each:
 //
 //   - The alias — `alias git='jog git'` — snapshots before every git
-//     command the user types.
+//     command the user types. This is the standard install.
 //   - The preexec hook — one line calling `jog shell-hook` from the
 //     shell's before-each-command mechanism (bash PS0, zsh
 //     preexec_functions, fish's fish_preexec event) — snapshots before
 //     every interactive command, so `rm -rf`, `sed -i`, and `make
-//     clean` are covered too. PowerShell has no preexec mechanism, so
-//     it gets the alias only. On a git command both fire: the preexec
-//     snapshot mints and the alias-path snapshot no-ops.
+//     clean` are covered too. Opt-in via --preexec: hooking every
+//     command is a bigger ask than an alias, so it is never wired
+//     silently. PowerShell has no preexec mechanism, so it gets the
+//     alias only. On a git command both fire: the preexec snapshot
+//     mints and the alias-path snapshot no-ops.
 //
 // Each line lives as one marked line appended to the shell's rc file,
 // kakrc-style (see internal/editors/kakoune.go): adding and removing
@@ -25,8 +27,8 @@
 // PowerShell on Windows) — wiring shells the user doesn't use would
 // touch files for no reason. Naming shells forces them, same as
 // `jog agents install <name>`. uninstall with no names sweeps every rc
-// file carrying jog's markers. --no-alias / --no-preexec scope either
-// verb to one surface.
+// file carrying jog's markers, both surfaces; --no-alias / --no-preexec
+// spare one.
 package shell
 
 import (
@@ -299,13 +301,19 @@ func shellNames() string {
 	return strings.Join(names, ", ")
 }
 
-const usage = "jog: usage: jog shell install|uninstall|list [--no-alias|--no-preexec] [<shell>…]"
+const usage = "jog: usage: jog shell install [--preexec] [--no-alias] | uninstall [--no-alias|--no-preexec] | list  [<shell>…]"
 
 // Run is the `jog shell` command: parse the action, surface flags, and
 // shell names, then dispatch.
+//
+// The surfaces are asymmetric by design: an alias is a known quantity,
+// a preexec hook is a bigger ask. So install is alias-only until
+// --preexec opts in (--no-alias scopes to the hook alone), while bare
+// uninstall sweeps everything jog wired — removal should always be
+// complete — with --no-alias/--no-preexec sparing one surface.
 func Run(args []string) int {
 	action := ""
-	doAlias, doPreexec := true, true
+	preexec, noAlias, noPreexec := false, false, false
 	var names []string
 	for _, a := range args {
 		switch a {
@@ -315,10 +323,12 @@ func Run(args []string) int {
 				return 2
 			}
 			action = a
+		case "--preexec":
+			preexec = true
 		case "--no-alias":
-			doAlias = false
+			noAlias = true
 		case "--no-preexec":
-			doPreexec = false
+			noPreexec = true
 		default:
 			if strings.HasPrefix(a, "-") {
 				fmt.Fprintln(os.Stderr, usage)
@@ -327,7 +337,26 @@ func Run(args []string) int {
 			names = append(names, a)
 		}
 	}
-	if action == "" || (!doAlias && !doPreexec) {
+	if action == "" {
+		fmt.Fprintln(os.Stderr, usage)
+		return 2
+	}
+	doAlias, doPreexec := true, true
+	switch action {
+	case "install":
+		if noPreexec { // the old spelling of today's default — refuse, don't guess
+			fmt.Fprintln(os.Stderr, usage)
+			return 2
+		}
+		doAlias, doPreexec = !noAlias, preexec
+	case "uninstall":
+		if preexec {
+			fmt.Fprintln(os.Stderr, usage)
+			return 2
+		}
+		doAlias, doPreexec = !noAlias, !noPreexec
+	}
+	if !doAlias && !doPreexec {
 		fmt.Fprintln(os.Stderr, usage)
 		return 2
 	}
@@ -429,6 +458,9 @@ func runInstall(targets []sh, fs []surface) int {
 	note := func(n string) { fmt.Println(install.StyleDim.Render("  · " + n)) }
 	for _, s := range activated {
 		note("takes effect in new " + s.name + " sessions — or `" + s.source + "` now")
+	}
+	if len(fs) == 1 && fs[0].key == aliasSurface.key {
+		note("`jog shell install --preexec` also snapshots before every command, not just git")
 	}
 	if preexecNew {
 		note("the preexec hook snapshots before every command, not just git — `jog shell uninstall --no-alias` removes just it")
