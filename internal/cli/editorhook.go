@@ -49,10 +49,8 @@ func EditorHook(editorName string, fileArgs []string) int {
 	// Relativize against the toplevel for a readable timeline; a file
 	// somehow outside the repo stays absolute, labeled honestly.
 	rel := abs
-	if abs != "" {
-		if top, err := repo.Run("rev-parse", "--show-toplevel"); err == nil && top != "" {
-			rel = relPath(top, abs)
-		}
+	if abs != "" && repo.Top != "" {
+		rel = relPath(repo.Top, abs)
 	}
 
 	res, err := snap.Take(repo, provenance.Save(editorName, rel))

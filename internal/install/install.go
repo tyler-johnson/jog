@@ -44,10 +44,8 @@ func ProjectRoot() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if repo, err := gitx.Discover(wd); err == nil && !repo.Bare {
-		if top, err := repo.Run("rev-parse", "--show-toplevel"); err == nil && top != "" {
-			return top, nil
-		}
+	if repo, err := gitx.Discover(wd); err == nil && repo.Top != "" {
+		return repo.Top, nil
 	}
 	return wd, nil
 }

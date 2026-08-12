@@ -80,12 +80,12 @@ echo "--- git status baseline"
 run "git status" git --no-optional-locks status --porcelain
 
 echo
-echo "--- clean no-op (status fast path: 3 spawns)"
+echo "--- clean no-op (status fast path: 2 spawns warm)"
 "$JOG" shell-hook -- "bench warmup"
 run "shell-hook clean" "$JOG" shell-hook -- "bench"
 
 echo
-echo "--- dirty-but-unchanged no-op (the hook hot path: 5 spawns)"
+echo "--- dirty-but-unchanged no-op (the hook hot path: 4 spawns warm)"
 printf 'uncommitted\n' >wip.txt
 "$JOG" shell-hook -- "bench warmup" # mints the snapshot; the rest no-op
 run "shell-hook dirty" "$JOG" shell-hook -- "bench"

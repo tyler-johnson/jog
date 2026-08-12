@@ -436,6 +436,84 @@ func TestSnapshotSlashBranch(t *testing.T) {
 	tr.Git("rev-parse", "--verify", "refs/jog/feature/x")
 }
 
+// The tree cache is advisory only: garbage in trees.json costs the
+// rev-parse fallback, never correctness — the chain topology must come out
+// identical.
+func TestTreeCacheCorrupt(t *testing.T) {
+	tr, r := setup(t)
+	tr.Write("a.txt", "x\n")
+	head := tr.Commit("first")
+	tr.Write("b.txt", "1\n")
+	res1 := take(t, r, "manual: one")
+
+	cache := filepath.Join(tr.GitDir, "jog", "trees.json")
+	if _, err := os.Stat(cache); err != nil {
+		t.Fatalf("mint did not write the tree cache: %v", err)
+	}
+	if err := os.WriteFile(cache, []byte(`{"not a sha": 42}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	tr.Write("b.txt", "2\n")
+	res2 := take(t, r, "manual: two")
+	if got := tr.Git("log", "-1", "--format=%P", res2.Ref); got != res1.Commit+" "+head {
+		t.Errorf("parents after corrupt cache = %q, want %q", got, res1.Commit+" "+head)
+	}
+}
+
+// A chain ref moved behind jog's back (trim, a concurrent jog, the user)
+// must be seen: the native read returns the ref's current value, the moved-
+// to sha's tree is no longer cached (saves rewrite the file whole), and the
+// fallback fills the gap — parents and CAS both use the true current state.
+func TestTreeCacheExternalRefMove(t *testing.T) {
+	tr, r := setup(t)
+	tr.Write("a.txt", "x\n")
+	head := tr.Commit("first")
+	tr.Write("b.txt", "1\n")
+	res1 := take(t, r, "manual: one")
+	tr.Write("b.txt", "2\n")
+	take(t, r, "manual: two")
+
+	tr.Git("update-ref", res1.Ref, res1.Commit) // rewind the chain to snap one
+
+	tr.Write("b.txt", "3\n")
+	res3 := take(t, r, "manual: three")
+	if got := tr.Git("log", "-1", "--format=%P", res3.Ref); got != res1.Commit+" "+head {
+		t.Errorf("parents after external rewind = %q, want %q", got, res1.Commit+" "+head)
+	}
+}
+
+// A reftable repo defeats every native read (refs live in reftable/, the
+// HEAD file is a `refs/heads/.invalid` stub — lab-verified); the engine
+// must land on the right chain via its spawn fallbacks.
+func TestSnapshotReftable(t *testing.T) {
+	t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
+	t.Setenv("GIT_CONFIG_SYSTEM", os.DevNull)
+	dir := t.TempDir()
+	r0 := &gitx.Repo{WorkDir: dir}
+	if _, err := r0.Run("init", "-q", "-b", "main", "--ref-format=reftable", "."); err != nil {
+		t.Skip("git without reftable support")
+	}
+	r, err := gitx.Discover(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "a.txt"), []byte("x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	res := take(t, r, "manual: reftable")
+	if res.Ref != "refs/jog/main" {
+		t.Errorf("ref = %q, want refs/jog/main (the .invalid stub must not name the chain)", res.Ref)
+	}
+	if got, err := r.RunRead("rev-parse", res.Ref); err != nil || got != res.Commit {
+		t.Errorf("chain ref = %q (%v), want %s", got, err, res.Commit)
+	}
+	if res2 := take(t, r, "manual: reftable again"); !res2.NoOp {
+		t.Errorf("second snapshot = %+v, want NoOp", res2)
+	}
+}
+
 // Bare repos: nothing to snapshot, distinct error.
 func TestSnapshotBareRepo(t *testing.T) {
 	t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)

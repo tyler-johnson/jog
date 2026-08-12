@@ -183,13 +183,12 @@ func restorePaths(repo *gitx.Repo, target string, paths []string) int {
 // are structurally untouchable. Runs from the toplevel — diff paths are
 // root-relative.
 func restoreAll(repo *gitx.Repo, target, fresh string) int {
-	top, err := repo.RunRead("rev-parse", "--show-toplevel")
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "jog: %v\n", err)
+	if repo.Top == "" {
+		fmt.Fprintln(os.Stderr, "jog: cannot resolve the repository toplevel")
 		return 1
 	}
 	tr := *repo
-	tr.WorkDir = top
+	tr.WorkDir = repo.Top
 
 	out, err := tr.RunRead("diff", "--name-status", "--no-renames", "-z", target, fresh)
 	if err != nil {
@@ -213,7 +212,7 @@ func restoreAll(repo *gitx.Repo, target, fresh string) int {
 	}
 
 	for _, p := range toDelete {
-		removeWithEmptyParents(top, p)
+		removeWithEmptyParents(repo.Top, p)
 	}
 	if len(toRestore) > 0 {
 		restoreArgs := append([]string{"restore", "--source=" + target, "--worktree", "--"}, toRestore...)

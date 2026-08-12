@@ -66,42 +66,53 @@ func TestSpawnBudget(t *testing.T) {
 	tr.Commit("first")
 	tr.Write("b.txt", "wip\n")
 
-	// First snapshot, cold shadow: state 1 + config 1 + status 1 +
-	// read-tree seed 1 + add 1 + write-tree 1 + commit-tree 1 +
-	// update-ref 1 + gc-config get/set/set 3.
-	count("first snapshot (cold shadow)", 11, func() {
+	// First snapshot, cold shadow, empty tree cache: state fallback 1 +
+	// config 1 + status 1 + read-tree seed 1 + add 1 + write-tree 1 +
+	// commit-tree 1 + update-ref 1 + gc-config get/set/set 3. (The ref's
+	// absence is known natively; the spawn is for HEAD's uncached tree.)
+	count("first snapshot (cold shadow, cold cache)", 11, func() {
 		if res := take(t, r, "manual: first"); res.Commit == "" {
 			t.Fatalf("expected a snapshot, got %+v", res)
 		}
 	})
 
 	// The hook hot path (repeated tool calls mid-edit), M8 headline number:
-	// state 1 + config 1 + status 1 + add 1 + write-tree 1.
-	count("dirty-but-unchanged no-op (warm shadow)", 5, func() {
+	// config 1 + status 1 + add 1 + write-tree 1 — state answered by the
+	// native ref reads and the tree cache the mint above wrote.
+	count("dirty-but-unchanged no-op (warm shadow)", 4, func() {
 		if res := take(t, r, "manual: unchanged"); !res.NoOp {
 			t.Fatalf("expected NoOp, got %+v", res)
 		}
 	})
 
 	// A real change, warm shadow: the no-op path + commit-tree + update-ref.
-	count("changed tree (warm shadow)", 7, func() {
+	count("changed tree (warm shadow)", 6, func() {
 		tr.Write("b.txt", "wip 2\n")
 		if res := take(t, r, "manual: changed"); res.Commit == "" {
 			t.Fatalf("expected a snapshot, got %+v", res)
 		}
 	})
 
-	// Clean tree, M8's other headline: state 1 + config 1 + status 1 —
-	// the empty status doubles as proof the tree is HEAD's, no shadow work.
+	// A commit moves HEAD to a sha the cache has never seen: one state
+	// fallback re-fills the cache, plus config + status.
 	tr.Commit("absorb the wip") // worktree now == HEAD == last snapshot's tree
-	count("clean no-op", 3, func() {
+	count("clean no-op, HEAD moved (cache refresh)", 3, func() {
 		if res := take(t, r, "manual: clean"); !res.NoOp {
 			t.Fatalf("expected NoOp, got %+v", res)
 		}
 	})
 
-	// Unborn HEAD, first snapshot: the batched rev-parse dies at HEAD and
-	// the chain is queried alone (2), then config 1 + status 1 +
+	// Clean tree, warm cache — M8's other headline: config 1 + status 1.
+	// The empty status doubles as proof the tree is HEAD's; state comes
+	// from files and the cache alone.
+	count("clean no-op (warm cache)", 2, func() {
+		if res := take(t, r, "manual: clean again"); !res.NoOp {
+			t.Fatalf("expected NoOp, got %+v", res)
+		}
+	})
+
+	// Unborn HEAD, first snapshot: fully native state (no HEAD, no chain,
+	// no trees to look up — zero state spawns), then config 1 + status 1 +
 	// read-tree --empty 1 + add 1 + write-tree 1 + commit-tree 1 +
 	// update-ref 1 + gc-config 3.
 	tu := testrepo.New(t)
@@ -110,7 +121,7 @@ func TestSpawnBudget(t *testing.T) {
 		t.Fatal(err)
 	}
 	tu.Write("a.txt", "before first commit\n")
-	count("unborn HEAD, first snapshot", 12, func() {
+	count("unborn HEAD, first snapshot", 10, func() {
 		if res := take(t, ru, "manual: unborn"); res.Commit == "" {
 			t.Fatalf("expected a snapshot, got %+v", res)
 		}

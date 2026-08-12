@@ -57,6 +57,8 @@ type Repo struct {
 	GitDir string
 	// WorkDir is the directory commands run in.
 	WorkDir string
+	// Top is the worktree's toplevel (absolute); empty for a bare repo.
+	Top string
 	// Bare reports a bare repository (no worktree; nothing to snapshot).
 	Bare bool
 
@@ -65,23 +67,60 @@ type Repo struct {
 
 // Discover locates the repository containing dir. Returns ErrNotARepo
 // (wrapped) when dir is not inside one.
+//
+// One spawn answers everything, including the toplevel every downstream
+// path wants. `--show-toplevel` goes last: in a bare repo it is fatal, but
+// rev-parse prints the successful answers first and — unlike a failing
+// revision arg — does not echo the option (lab-verified), so the two lines
+// on stdout survive and Top stays empty.
 func Discover(dir string) (*Repo, error) {
 	r := &Repo{WorkDir: dir}
-	out, err := r.Run("rev-parse", "--absolute-git-dir", "--is-bare-repository")
+	out, err := r.Run("rev-parse", "--absolute-git-dir", "--is-bare-repository", "--show-toplevel")
 	if err != nil {
 		var ge *GitError
-		if errors.As(err, &ge) && strings.Contains(ge.Stderr, "not a git repository") {
+		if !errors.As(err, &ge) {
+			return nil, err
+		}
+		if strings.Contains(ge.Stderr, "not a git repository") {
 			return nil, fmt.Errorf("%w: %s", ErrNotARepo, dir)
 		}
-		return nil, err
+		// Recover the partial answer only when it says bare — anything
+		// else (say, $GIT_DIR pointing at a repo with no worktree) keeps
+		// erroring here exactly as the batched read always has.
+		lines := strings.Split(ge.Stdout, "\n")
+		if len(lines) != 2 || strings.TrimSpace(lines[1]) != "true" {
+			return nil, err
+		}
+		r.GitDir, r.Bare = lines[0], true
+		return r, nil
 	}
-	gitDir, bare, ok := strings.Cut(out, "\n")
-	if !ok {
+	lines := strings.Split(out, "\n")
+	if len(lines) != 3 {
 		return nil, fmt.Errorf("unexpected rev-parse output: %q", out)
 	}
-	r.GitDir = gitDir
-	r.Bare = strings.TrimSpace(bare) == "true"
+	r.GitDir = lines[0]
+	r.Bare = strings.TrimSpace(lines[1]) == "true"
+	r.Top = lines[2]
 	return r, nil
+}
+
+// CommonDir is the directory shared state (refs, packed-refs, objects)
+// lives in: GitDir itself for a primary worktree; for a linked worktree,
+// the main git dir, named relatively by GitDir/commondir
+// (gitrepository-layout(5)).
+func (r *Repo) CommonDir() string {
+	b, err := os.ReadFile(filepath.Join(r.GitDir, "commondir"))
+	if err != nil {
+		return r.GitDir
+	}
+	p := strings.TrimSpace(string(b))
+	if p == "" {
+		return r.GitDir
+	}
+	if !filepath.IsAbs(p) {
+		p = filepath.Join(r.GitDir, p)
+	}
+	return filepath.Clean(p)
 }
 
 // Run executes git with args and returns trimmed stdout. Non-zero exits
@@ -192,7 +231,10 @@ func (r *Repo) HeadBranch() (branch string, detached bool) {
 	if b, err := os.ReadFile(filepath.Join(r.GitDir, "HEAD")); err == nil {
 		s := strings.TrimSpace(string(b))
 		if rest, ok := strings.CutPrefix(s, "ref: "); ok {
-			if br, ok := strings.CutPrefix(rest, "refs/heads/"); ok && br != "" {
+			// ".invalid" is never a branch: a reftable repo's HEAD file is
+			// a stub reading `ref: refs/heads/.invalid` (lab-verified) —
+			// the truth lives in reftable, so ask git.
+			if br, ok := strings.CutPrefix(rest, "refs/heads/"); ok && br != "" && br != ".invalid" {
 				return br, false
 			}
 			// Symref outside refs/heads — rare; let git interpret it.
@@ -205,6 +247,70 @@ func (r *Repo) HeadBranch() (branch string, detached bool) {
 		return "", true
 	}
 	return out, false
+}
+
+// ReadRef resolves a ref natively from the files backend: the loose file
+// (which shadows any packed entry), then packed-refs. Like HeadBranch, it
+// exists for the snapshot hot path and is an optimization, never a
+// semantic: ok=false means the answer cannot be known from files alone —
+// reftable backend, unreadable file, unexpected content — and the caller
+// must ask git. ok=true with sha=="" means the ref definitively does not
+// exist. Reads race concurrent ref updates exactly as a rev-parse spawn
+// always has; callers' compare-and-swap writes remain the guard.
+func (r *Repo) ReadRef(name string) (sha string, ok bool) {
+	common := r.CommonDir()
+	// A reftable repo keeps refs in reftable/ and leaves stub files
+	// behind (lab-verified: refs/heads is a plain file there) — absence
+	// under refs/ proves nothing, so never answer natively.
+	if _, err := os.Stat(filepath.Join(common, "reftable")); err == nil {
+		return "", false
+	}
+	b, err := os.ReadFile(filepath.Join(common, filepath.FromSlash(name)))
+	switch {
+	case err == nil:
+		if s := strings.TrimSpace(string(b)); isHex(s) {
+			return s, true
+		}
+		return "", false // symref or unexpected content — let git interpret it
+	case !os.IsNotExist(err):
+		return "", false // permission, stray file in the path, …
+	}
+	pb, err := os.ReadFile(filepath.Join(common, "packed-refs"))
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "", true // no loose file, no pack: the ref does not exist
+		}
+		return "", false
+	}
+	for line := range strings.SplitSeq(string(pb), "\n") {
+		// Entries are `<sha> <refname>`; the `# pack-refs` header and
+		// `^<sha>` peel lines can never match a refname.
+		s, ref, found := strings.Cut(line, " ")
+		if found && ref == name && isHex(s) {
+			return s, true
+		}
+	}
+	return "", true
+}
+
+// HeadSHA resolves HEAD to a commit sha natively: the HEAD file for a
+// detached head, ReadRef for a branch. Same contract as ReadRef —
+// ok=false means ask git; ok=true with sha=="" means unborn HEAD.
+func (r *Repo) HeadSHA() (sha string, ok bool) {
+	b, err := os.ReadFile(filepath.Join(r.GitDir, "HEAD"))
+	if err != nil {
+		return "", false
+	}
+	s := strings.TrimSpace(string(b))
+	if isHex(s) {
+		return s, true // detached
+	}
+	rest, hasRef := strings.CutPrefix(s, "ref: ")
+	br, onBranch := strings.CutPrefix(rest, "refs/heads/")
+	if !hasRef || !onBranch || br == "" || br == ".invalid" {
+		return "", false // odd symref, or the reftable stub (see HeadBranch)
+	}
+	return r.ReadRef("refs/heads/" + br)
 }
 
 func isHex(s string) bool {

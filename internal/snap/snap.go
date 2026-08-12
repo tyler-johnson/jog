@@ -8,11 +8,13 @@
 // at snapshot time (the base edge). The chain head lives at
 // refs/jog/<branch>, invisible to branches, index, and remotes.
 //
-// The hot path is spawn-frugal (PLAN-V1 M8): repository state comes from one
-// batched rev-parse, config from one --get-regexp, and the D2 status
-// pre-scan doubles as a clean-tree detector that skips the shadow index
-// entirely — five spawns for a dirty-but-unchanged no-op, three for a clean
-// tree. TestSpawnBudget gates every scenario's exact count.
+// The hot path is spawn-frugal (PLAN-V1 M8): repository state is read
+// natively when it can be — ref files plus the sha→tree cache
+// (treecache.go), with a batched rev-parse as the authoritative fallback —
+// config comes from one --get-regexp, and the D2 status pre-scan doubles
+// as a clean-tree detector that skips the shadow index entirely — four
+// spawns for a warm dirty-but-unchanged no-op, two for a clean tree.
+// TestSpawnBudget gates every scenario's exact count.
 package snap
 
 import (
@@ -73,8 +75,9 @@ type engine struct {
 	top    string
 }
 
-// state is everything Take needs from the object database, read in one
-// batched rev-parse (see readState).
+// state is everything Take needs from the object database — natively when
+// files and the tree cache suffice, else in one batched rev-parse (see
+// readState).
 type state struct {
 	top      string
 	headSHA  string // empty on unborn HEAD
@@ -220,6 +223,15 @@ func Take(repo *gitx.Repo, message string) (*Result, error) {
 		return nil, err
 	}
 
+	// The next run's chain head is snapSHA and its tree is known — cache
+	// them (plus HEAD's, usually still current) so it can skip the state
+	// spawn entirely.
+	trees := map[string]string{snapSHA: tree}
+	if born {
+		trees[st.headSHA] = st.headTree
+	}
+	saveTrees(e.repo.GitDir, trees)
+
 	res := &Result{Ref: ref, Commit: snapSHA, SkippedFiles: skipped, FirstSnapshot: st.prev == ""}
 	if res.FirstSnapshot {
 		res.GCConfigured = e.ensureGCConfig()
@@ -227,39 +239,99 @@ func Take(repo *gitx.Repo, message string) (*Result, error) {
 	return res, nil
 }
 
-// readState fetches toplevel, HEAD, and chain-ref state in one batched
-// rev-parse. rev-parse answers queries in order and, when one fails, prints
-// the successful answers first, then the failing arg echoed literally, then
+// readState fetches HEAD and chain-ref state (the toplevel rides Discover's
+// spawn, in repo.Top). The fast path answers from files and the tree cache
+// without a spawn; any gap falls back to the batched rev-parse, whose
+// answers then refill the cache for the next run.
+func readState(repo *gitx.Repo, ref string) (*state, error) {
+	st := &state{top: repo.Top}
+	if fastState(repo, ref, st) {
+		return st, nil
+	}
+	if err := spawnState(repo, ref, st); err != nil {
+		return nil, err
+	}
+	trees := map[string]string{}
+	if st.headSHA != "" {
+		trees[st.headSHA] = st.headTree
+	}
+	if st.prev != "" {
+		trees[st.prev] = st.prevTree
+	}
+	saveTrees(repo.GitDir, trees)
+	return st, nil
+}
+
+// fastState resolves the state without spawning git: shas via the native
+// ref reads (gitx.HeadSHA/ReadRef — authoritative or declined, never
+// guessed), trees via the cache (sha→tree is a permanent fact, so a hit
+// cannot be stale). Any gap — non-files ref backend, uncached commit —
+// returns false for the spawn fallback. Racing a concurrent ref update
+// yields a momentarily stale sha exactly as the spawn always could; the
+// engine's update-ref CAS stays the guard either way.
+func fastState(repo *gitx.Repo, ref string, st *state) bool {
+	headSHA, ok := repo.HeadSHA()
+	if !ok {
+		return false
+	}
+	prev, ok := repo.ReadRef(ref)
+	if !ok {
+		return false
+	}
+	st.headSHA, st.prev = headSHA, prev
+
+	var trees map[string]string
+	need := func(sha string) (string, bool) {
+		if trees == nil {
+			trees = loadTrees(repo.GitDir)
+		}
+		tree, hit := trees[sha]
+		return tree, hit
+	}
+	if headSHA != "" {
+		if st.headTree, ok = need(headSHA); !ok {
+			return false
+		}
+	}
+	if prev != "" {
+		if st.prevTree, ok = need(prev); !ok {
+			return false
+		}
+	}
+	return true
+}
+
+// spawnState is the authoritative fallback: one batched rev-parse.
+// rev-parse answers queries in order and, when one fails, prints the
+// successful answers first, then the failing arg echoed literally, then
 // exits 128 (lab-verified) — so the count of surviving lines identifies
 // which optional pieces (HEAD on unborn repos, the chain ref before the
 // first snapshot) are absent. The `^{commit}`/`^{tree}` suffixes force
 // revision interpretation, so a worktree file named like an arg can never
 // alias a query.
-func readState(repo *gitx.Repo, ref string) (*state, error) {
+func spawnState(repo *gitx.Repo, ref string, st *state) error {
 	lines, err := tolerantRevParse(repo,
-		"--show-toplevel", "HEAD^{commit}", "HEAD^{tree}", ref+"^{commit}", ref+"^{tree}")
+		"HEAD^{commit}", "HEAD^{tree}", ref+"^{commit}", ref+"^{tree}")
 	if err != nil {
-		return nil, err
+		return err
 	}
-	st := &state{}
 	switch len(lines) {
-	case 5: // the hot path: born HEAD, chain exists
-		st.top, st.headSHA, st.headTree, st.prev, st.prevTree = lines[0], lines[1], lines[2], lines[3], lines[4]
-	case 3: // born HEAD, no chain yet (first snapshot on this branch)
-		st.top, st.headSHA, st.headTree = lines[0], lines[1], lines[2]
-	case 1: // unborn HEAD killed the batch early; ask about the chain alone
-		st.top = lines[0]
+	case 4: // born HEAD, chain exists
+		st.headSHA, st.headTree, st.prev, st.prevTree = lines[0], lines[1], lines[2], lines[3]
+	case 2: // born HEAD, no chain yet (first snapshot on this branch)
+		st.headSHA, st.headTree = lines[0], lines[1]
+	case 0: // unborn HEAD killed the batch early; ask about the chain alone
 		rl, err := tolerantRevParse(repo, ref+"^{commit}", ref+"^{tree}")
 		if err != nil {
-			return nil, err
+			return err
 		}
 		if len(rl) == 2 {
 			st.prev, st.prevTree = rl[0], rl[1]
 		}
 	default:
-		return nil, fmt.Errorf("unexpected rev-parse state (%d lines)", len(lines))
+		return fmt.Errorf("unexpected rev-parse state (%d lines)", len(lines))
 	}
-	return st, nil
+	return nil
 }
 
 // tolerantRevParse runs a multi-query rev-parse and returns the lines that

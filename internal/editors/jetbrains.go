@@ -78,14 +78,10 @@ func jetbrainsPath() (string, error) {
 		return "", err
 	}
 	repo, err := gitx.Discover(wd)
-	if err != nil || repo.Bare {
+	if err != nil || repo.Top == "" {
 		return "", fmt.Errorf("the hook lives in the project's .idea directory — run this inside a git repository")
 	}
-	top, err := repo.Run("rev-parse", "--show-toplevel")
-	if err != nil || top == "" {
-		return "", fmt.Errorf("cannot resolve the repository toplevel")
-	}
-	idea := filepath.Join(top, ".idea")
+	idea := filepath.Join(repo.Top, ".idea")
 	if !install.FileExists(idea) {
 		return "", fmt.Errorf("no .idea directory here — open the project in a JetBrains IDE once, then re-run this")
 	}
