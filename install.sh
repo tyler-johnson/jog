@@ -3,9 +3,11 @@
 #   curl -fsSL https://raw.githubusercontent.com/tyler-johnson/jog/main/install.sh | sh
 #
 # Downloads the latest release binary for this platform, verifies its
-# sha256 against the release's checksums.txt, and installs it to
+# sha256 against the release's checksums.txt, installs it to
 # ~/.local/bin (override with JOG_INSTALL_DIR; pin a version with
-# JOG_VERSION, e.g. JOG_VERSION=v1.3.0). Windows: use install.ps1.
+# JOG_VERSION, e.g. JOG_VERSION=v1.3.0), then finishes with the guided
+# setup (`jog install`) when a terminal is available. Windows: use
+# install.ps1.
 set -eu
 
 REPO="tyler-johnson/jog"
@@ -84,7 +86,15 @@ case ":$PATH:" in
      echo "$INSTALL_DIR is not on your PATH — add it to your shell rc:"
      echo "  export PATH=\"$INSTALL_DIR:\$PATH\"" ;;
 esac
+# Finish with the guided setup. Piped installs (`curl | sh`) have no
+# usable stdin — the pipe carries this script — so the wizard reads the
+# terminal directly; without one (CI, containers), setup stays a next
+# step instead of running blind.
 echo ""
-echo "next steps:"
-echo "  jog install     # guided setup: the git alias, agent hooks, editor hooks"
-echo "  jog doctor      # verify the wiring"
+if (exec < /dev/tty) 2>/dev/null; then
+  "$INSTALL_DIR/jog" install < /dev/tty
+else
+  echo "next steps:"
+  echo "  jog install     # guided setup: the shell wiring, agent hooks, editor hooks"
+  echo "  jog doctor      # verify the wiring"
+fi

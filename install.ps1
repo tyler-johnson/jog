@@ -58,7 +58,14 @@ if (($env:Path -split ';') -notcontains $installDir) {
     $env:Path = "$env:Path;$installDir"
 }
 
+# Finish with the guided setup — `irm | iex` runs in the user's own
+# session, so the wizard can ask its questions directly; redirected
+# stdin (CI) leaves setup as a next step instead of running blind.
 Write-Host ''
-Write-Host 'next steps:'
-Write-Host '  jog install     # guided setup: the git alias, agent hooks, editor hooks'
-Write-Host '  jog doctor      # verify the wiring'
+if (-not [Console]::IsInputRedirected) {
+    & "$installDir\jog.exe" install
+} else {
+    Write-Host 'next steps:'
+    Write-Host '  jog install     # guided setup: the shell wiring, agent hooks, editor hooks'
+    Write-Host '  jog doctor      # verify the wiring'
+}
