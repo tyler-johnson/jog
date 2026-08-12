@@ -169,6 +169,62 @@ func (c client) skillLocation() string {
 	return ""
 }
 
+// Wiring is one surface's install or uninstall outcome for one client,
+// returned without printing — the `jog install`/`jog uninstall` wizard
+// folds these into its own summary.
+type Wiring struct {
+	Client  string
+	Surface string // "hooks" or "skill"
+	Where   string // display location; "" on error
+	Changed bool
+	Err     error
+}
+
+// InstallClients wires hooks + skill at user scope for the named
+// clients, quietly. Same mechanics as `jog agents install`; only the
+// reporting differs.
+func InstallClients(names []string) []Wiring {
+	var out []Wiring
+	for _, name := range names {
+		for _, c := range clients {
+			if c.name != name {
+				continue
+			}
+			_, hooksDid, hooksErr := c.installHooks(false)
+			out = append(out, Wiring{Client: c.name, Surface: "hooks",
+				Where: c.whereHooks(), Changed: hooksDid, Err: hooksErr})
+			_, skillDid, skillErr := c.installSkill(false)
+			out = append(out, Wiring{Client: c.name, Surface: "skill",
+				Where: c.skillLocation(), Changed: skillDid, Err: skillErr})
+		}
+	}
+	return out
+}
+
+// UninstallClients removes hooks + skill at user scope for the named
+// clients, quietly. Same mechanics as `jog agents uninstall`; only the
+// reporting differs. Locations are captured before removal, so the
+// summary can say where each surface came out of.
+func UninstallClients(names []string) []Wiring {
+	var out []Wiring
+	for _, name := range names {
+		for _, c := range clients {
+			if c.name != name {
+				continue
+			}
+			hooksWhere := c.whereHooks()
+			_, hooksDid, hooksErr := c.uninstallHooks(false)
+			out = append(out, Wiring{Client: c.name, Surface: "hooks",
+				Where: hooksWhere, Changed: hooksDid, Err: hooksErr})
+			skillWhere := c.skillLocation()
+			_, skillDid, skillErr := c.uninstallSkill(false)
+			out = append(out, Wiring{Client: c.name, Surface: "skill",
+				Where: skillWhere, Changed: skillDid, Err: skillErr})
+		}
+	}
+	return out
+}
+
 func clientNames() string {
 	names := make([]string, len(clients))
 	for i, c := range clients {

@@ -409,6 +409,47 @@ func Run(args []string) int {
 	}
 }
 
+// Wiring is one surface's install or uninstall outcome, returned
+// without printing — the `jog install`/`jog uninstall` wizard folds
+// these into its own summary.
+type Wiring struct {
+	Surface string // "alias" or "preexec"
+	Where   string // the rc file, tilde-rendered
+	Changed bool
+	Source  string // command that activates the line in the current session
+	Err     error
+}
+
+// Install wires the chosen surfaces into one shell's rc file, quietly.
+// Same mechanics as `jog shell install`; only the reporting differs.
+func Install(name string, alias, preexec bool) []Wiring {
+	return apply(name, alias, preexec, sh.installSurface)
+}
+
+// Uninstall removes the chosen surfaces from one shell's rc file,
+// quietly. Same mechanics as `jog shell uninstall`; only the reporting
+// differs.
+func Uninstall(name string, alias, preexec bool) []Wiring {
+	return apply(name, alias, preexec, sh.uninstallSurface)
+}
+
+func apply(name string, alias, preexec bool, act func(sh, surface) (string, bool, error)) []Wiring {
+	s := byName(name)
+	if s.name == "" {
+		return []Wiring{{Err: fmt.Errorf("unknown shell %q", name)}}
+	}
+	var out []Wiring
+	for _, f := range surfaces(alias, preexec) {
+		w := Wiring{Surface: f.key, Source: s.source}
+		if rc, err := s.rcPath(); err == nil {
+			w.Where = install.TildePath(rc)
+		}
+		_, w.Changed, w.Err = act(s, f)
+		out = append(out, w)
+	}
+	return out
+}
+
 func byName(name string) sh {
 	for _, s := range registry {
 		if s.name == name {

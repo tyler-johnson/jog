@@ -101,6 +101,38 @@ func (e editor) noteLines() []string {
 	return e.notes()
 }
 
+// Install wires one editor's save hook, quietly — the `jog install`
+// wizard composes its own summary. where is the hook's display
+// location; notes carries the caveats installEditor teaches.
+func Install(name string) (where string, changed bool, notes []string, err error) {
+	for _, e := range registry {
+		if e.name != name {
+			continue
+		}
+		if _, changed, err = e.doInstall(); err != nil {
+			return "", false, nil, err
+		}
+		return e.where(), changed, e.noteLines(), nil
+	}
+	return "", false, nil, fmt.Errorf("unknown editor %q", name)
+}
+
+// Uninstall removes one editor's save hook, quietly — where is the
+// location it came out of, captured before removal.
+func Uninstall(name string) (where string, changed bool, err error) {
+	for _, e := range registry {
+		if e.name != name {
+			continue
+		}
+		where = e.where()
+		if _, changed, err = e.doUninstall(); err != nil {
+			return "", false, err
+		}
+		return where, changed, nil
+	}
+	return "", false, fmt.Errorf("unknown editor %q", name)
+}
+
 func editorNames() string {
 	names := make([]string, len(registry))
 	for i, e := range registry {

@@ -97,4 +97,8 @@ else
   echo "next steps:"
   echo "  jog install     # guided setup: the shell wiring, agent hooks, editor hooks"
   echo "  jog doctor      # verify the wiring"
+  echo ""
+  echo "non-interactive setup (CI, coding agents) — flags answer every question:"
+  echo "  jog install --yes                             # every default"
+  echo "  jog install --yes --preexec --agents claude   # scoped; see: jog help install"
 fi

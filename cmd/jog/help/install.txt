@@ -1,19 +1,33 @@
 jog install — guided setup
 
 usage:
-  jog install [--yes]
+  jog install [--yes] [--[no-]alias] [--[no-]preexec]
+              [--[no-]agents [<names>]] [--[no-]editors [<names>]]
 
 Walks through jog's three wiring surfaces: the shell — the git alias
 and the snapshot-before-every-command preexec hook, one question each
 (`jog shell install`) — hooks + skill for the agent clients on this
 machine (`jog agents install`), and a post-save hook per detected
-editor (`jog editors install`). Each yes runs the same installer the
+editor (`jog editors install`). The agents and editors questions are
+checkbox pickers over what was detected — space toggles, enter
+confirms; with piped input they fall back to plain y/n lines. All the
+questions come first; the wiring then runs in one batch and a summary
+lists exactly what was installed. Each yes runs the same installer the
 standalone command runs — nothing here is reachable only through the
 wizard, and everything is additive and idempotent: re-running is
 always safe.
 
---yes takes every default without asking (login-shell alias, detected
-agents, detected editors; the preexec hook defaults to no — it is only
-ever wired on an explicit yes) — for scripts and dotfiles.
+For scripts, dotfiles, and coding agents running the setup, every
+question can be answered from the command line: --alias/--no-alias and
+--preexec/--no-preexec for the login shell's two lines,
+--agents/--no-agents for agent clients, --editors/--no-editors for
+editors. --agents and --editors alone cover everything detected, or
+take names — `--agents claude,codex`, comma- or space-separated — and
+a named client installs even when not auto-detected, same as the
+standalone commands. A flagged question is not asked. --yes answers
+whatever is left with its default (alias yes, agents yes, editors yes;
+the preexec hook defaults to no — it is only ever wired on an explicit
+yes or --preexec) — so `jog install --yes` is hands-off setup and
+`jog install --yes --preexec` adds the hook on top.
 
 `jog uninstall` reverses all of it; `jog doctor` verifies the wiring.

@@ -68,4 +68,8 @@ if (-not [Console]::IsInputRedirected) {
     Write-Host 'next steps:'
     Write-Host '  jog install     # guided setup: the shell wiring, agent hooks, editor hooks'
     Write-Host '  jog doctor      # verify the wiring'
+    Write-Host ''
+    Write-Host 'non-interactive setup (CI, coding agents) - flags answer every question:'
+    Write-Host '  jog install --yes                             # every default'
+    Write-Host '  jog install --yes --agents claude             # scoped; see: jog help install'
 }

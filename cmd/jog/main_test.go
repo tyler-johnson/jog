@@ -2775,7 +2775,7 @@ func TestInstallInteractive(t *testing.T) {
 		allYes = "y\ny\ny\n" // powershell login: no preexec question
 	}
 	home, env := newHome()
-	_, loginRC, loginDisplay, markedLine := loginShellFixture(home)
+	loginName, loginRC, loginDisplay, markedLine := loginShellFixture(home)
 	stdout, _, code := runJogEnvStdin(t, home, env, allYes, "install")
 	if code != 0 {
 		t.Fatalf("install: code=%d\n%s", code, stdout)
@@ -2785,10 +2785,16 @@ func TestInstallInteractive(t *testing.T) {
 	if preexecLine != "" {
 		wants = append(wants, "also snapshot before every command, not just git?")
 	}
+	// The summary lists exactly what landed, after every question — no
+	// installer output between questions.
+	wants = append(wants, "installed:", "✓ "+loginName, "✓ claude", "✓ vim", "~/.claude/settings.json")
 	for _, want := range wants {
 		if !strings.Contains(stdout, want) {
 			t.Errorf("install output missing %q:\n%s", want, stdout)
 		}
+	}
+	if q, s := strings.Index(stdout, "vim detected"), strings.Index(stdout, "installed:"); s < q {
+		t.Errorf("summary printed before the last question:\n%s", stdout)
 	}
 	b := string(mustRead(t, loginRC))
 	if !strings.Contains(b, "jog git") {
@@ -2811,6 +2817,9 @@ func TestInstallInteractive(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("all-no install: code=%d\n%s", code, stdout)
 	}
+	if !strings.Contains(stdout, "nothing installed") || strings.Contains(stdout, "installed:") {
+		t.Errorf("all-no install should summarize as nothing installed:\n%s", stdout)
+	}
 	for _, p := range []string{loginRC2, filepath.Join(home2, ".claude", "settings.json")} {
 		if _, err := os.Stat(p); !os.IsNotExist(err) {
 			t.Errorf("all-no install created %s", p)
@@ -2823,6 +2832,9 @@ func TestInstallInteractive(t *testing.T) {
 	stdout, _, code = runJogEnvStdin(t, home3, env3, "y\n", "install")
 	if code != 0 || !strings.Contains(stdout, "stopped early") {
 		t.Fatalf("EOF install: code=%d\n%s", code, stdout)
+	}
+	if !strings.Contains(stdout, "✓ "+loginName) || strings.Contains(stdout, "✓ claude") {
+		t.Errorf("EOF install summary should carry the alias row and nothing more:\n%s", stdout)
 	}
 	if _, err := os.Stat(loginRC3); err != nil {
 		t.Errorf("EOF install lost the completed alias step: %v", err)
@@ -2865,6 +2877,70 @@ func TestInstallInteractive(t *testing.T) {
 		t.Errorf("--yes skipped vim: %v", err)
 	}
 
+	// Per-question flags pre-answer without asking: --yes --preexec
+	// wires the hook that --yes alone leaves out, --no-agents drops the
+	// agents question entirely, and --yes still covers the rest.
+	home6, env6 := newHome()
+	_, loginRC6, _, _ := loginShellFixture(home6)
+	stdout, _, code = runJogEnvStdin(t, home6, env6, "", "install", "--yes", "--preexec", "--no-agents")
+	if code != 0 {
+		t.Fatalf("install --yes --preexec --no-agents: code=%d\n%s", code, stdout)
+	}
+	if preexecLine != "" {
+		if b := string(mustRead(t, loginRC6)); !strings.Contains(b, preexecLine) {
+			t.Errorf("--preexec flag did not wire the hook:\n%s", b)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(home6, ".claude", "settings.json")); !os.IsNotExist(err) {
+		t.Errorf("--no-agents still wired agents")
+	}
+	if _, err := os.Stat(vimPluginPath(home6)); err != nil {
+		t.Errorf("--yes should still cover editors: %v", err)
+	}
+
+	// A flagged question is skipped even interactively — the piped
+	// answers only reach the questions still open.
+	home7, env7 := newHome()
+	answers := "y\nn\ny\n" // alias, preexec, vim
+	if preexecLine == "" {
+		answers = "y\ny\n"
+	}
+	stdout, _, code = runJogEnvStdin(t, home7, env7, answers, "install", "--no-agents")
+	if code != 0 || strings.Contains(stdout, "detected agents") {
+		t.Fatalf("--no-agents still asked about agents: code=%d\n%s", code, stdout)
+	}
+	if _, err := os.Stat(vimPluginPath(home7)); err != nil {
+		t.Errorf("vim answer lost under --no-agents: %v", err)
+	}
+
+	// Named --agents scopes the plan and beats detection, like the
+	// standalone `jog agents install <name>` — codex is not detected in
+	// this home, claude is, and only codex may land.
+	home8, env8 := newHome()
+	stdout, _, code = runJogEnvStdin(t, home8, env8, "", "install", "--yes", "--agents", "codex", "--no-editors")
+	if code != 0 {
+		t.Fatalf("install --agents codex: code=%d\n%s", code, stdout)
+	}
+	if b := string(mustRead(t, filepath.Join(home8, ".codex", "hooks.json"))); !strings.Contains(b, hookNeedle("codex")) {
+		t.Errorf("named undetected agent not wired:\n%s", b)
+	}
+	if _, err := os.Stat(filepath.Join(home8, ".claude", "settings.json")); !os.IsNotExist(err) {
+		t.Errorf("--agents codex wired claude too")
+	}
+
+	// Unknown names fail before anything runs.
+	if _, stderr, code := runJogEnv(t, home, env, "install", "--agents", "nope"); code != 2 || !strings.Contains(stderr, "unknown agent client") {
+		t.Errorf("install --agents nope: code=%d %q", code, stderr)
+	}
+	if _, stderr, code := runJogEnv(t, home, env, "install", "--editors=nope"); code != 2 || !strings.Contains(stderr, "unknown editor") {
+		t.Errorf("install --editors=nope: code=%d %q", code, stderr)
+	}
+
+	// Contradictory flags are a usage error.
+	if _, stderr, code := runJogEnv(t, home, env, "install", "--alias", "--no-alias"); code != 2 || !strings.Contains(stderr, "usage") {
+		t.Errorf("install --alias --no-alias: code=%d %q", code, stderr)
+	}
+
 	// Unknown flag.
 	if _, stderr, code := runJogEnv(t, home, env, "install", "--nope"); code != 2 || !strings.Contains(stderr, "usage") {
 		t.Errorf("install --nope: code=%d %q", code, stderr)
@@ -2881,7 +2957,7 @@ func TestUninstallCommand(t *testing.T) {
 		}
 	}
 	env := append(fakeHome(home), "SHELL=/bin/zsh")
-	_, loginRC, _, _ := loginShellFixture(home)
+	loginName, loginRC, _, _ := loginShellFixture(home)
 	if stdout, _, code := runJogEnvStdin(t, home, env, "", "install", "--yes"); code != 0 {
 		t.Fatalf("seed install: code=%d\n%s", code, stdout)
 	}
@@ -2904,10 +2980,16 @@ func TestUninstallCommand(t *testing.T) {
 		t.Errorf("declined uninstall removed the vim hook: %v", err)
 	}
 
-	// Confirmed via --yes: alias, agent wiring, editor hook all gone.
+	// Confirmed via --yes: alias, agent wiring, editor hook all gone,
+	// and the summary lists each removed surface — install's format.
 	stdout, _, code = runJogEnvStdin(t, home, env, "", "uninstall", "--yes")
 	if code != 0 || !strings.Contains(stdout, "snapshots are untouched") {
 		t.Fatalf("uninstall --yes: code=%d\n%s", code, stdout)
+	}
+	for _, want := range []string{"removed:", "✓ " + loginName, "✓ claude", "✓ vim"} {
+		if !strings.Contains(stdout, want) {
+			t.Errorf("uninstall summary missing %q:\n%s", want, stdout)
+		}
 	}
 	if b := string(mustRead(t, loginRC)); strings.Contains(b, "jog git") || strings.Contains(b, "jog shell-hook") {
 		t.Errorf("login rc still carries jog lines:\n%s", b)
