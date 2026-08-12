@@ -299,7 +299,7 @@ Shows everything jog wired — the shell lines, agent hooks and skills,
 editor hooks — and removes all of it after one confirmation (`--yes`
 skips it). Only jog's own marked lines and managed files are touched:
 a hand-written alias, your settings, and any file carrying your edits
-are left alone, with a note.
+are left alone.
 
 ```console
 $ jog uninstall
@@ -313,16 +313,12 @@ currently wired:
 
 remove all of it? [y/N] y
 
-shell — the git alias and preexec hook
-  zsh        alias   ✓ removed the alias from ~/.zshrc
-  zsh        preexec ✓ removed the preexec hook from ~/.zshrc
-
-claude — Claude Code
-  hooks  ✓ removed 2 jog hook(s) from ~/.claude/settings.json — everything else untouched
-  skill  ✓ removed — ~/.claude/skills/jog/SKILL.md
-
-vim — Vim
-  hook   ✓ removed — ~/.vim/plugin/jog.vim
+removed:
+  ✓ zsh        alias   ~/.zshrc
+  ✓ zsh        preexec ~/.zshrc
+  ✓ claude     hooks   ~/.claude/settings.json
+  ✓ claude     skill   ~/.claude/skills/jog/SKILL.md
+  ✓ vim        hook    ~/.vim/plugin/jog.vim
 
 snapshots are untouched — they live in each repo's refs/jog/*; `jog trim` prunes them.
 the binary itself: rm ~/.local/bin/jog
