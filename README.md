@@ -28,9 +28,10 @@ restored to c0ffee1 (2 minutes ago — pre: git status): 14 restored, 0 deleted
 - [Install](#install)
 - [Recovery cookbook](#recovery-cookbook)
 - [Usage](#usage)
-- [Shell](#shell)
-- [Agents](#agents)
-- [Editors](#editors)
+- [Hooks](#hooks)
+  - [Shell](#shell)
+  - [Agents](#agents)
+  - [Editors](#editors)
 - [What jog will never touch](#what-jog-will-never-touch)
 - [Why not jog](#why-not-jog)
 - [Configuration](#configuration)
@@ -134,15 +135,10 @@ no changes since the last snapshot on main
 
 ## Recovery cookbook
 
-Recovering is two steps: locate the snapshot to roll back to, then
-restore to it.
-
-### Locating the snapshot
-
 `jog log` browses this branch's timeline. In a terminal it's an
 interactive browser — scrub with a live diff preview to find the
 version where things still worked, and press `r` to restore right
-there. Piped, it prints plainly; paths scope it, `-p` adds patches:
+there.
 
 ```console
 $ jog log
@@ -150,6 +146,8 @@ c0ffee1  2 minutes ago   pre: git status
 a1b2c3d  9 minutes ago   claude[b3f1a2c4]: Bash(go test ./...)
 9e8d7c6  14 minutes ago  manual: before parser rewrite
 ```
+
+### Other ways of locating a snapshot
 
 `jog since` answers "what did I actually change?" — a per-file summary
 since the last command boundary, or any time you give it:
@@ -193,13 +191,6 @@ restored to 9e8d7c6 (26 minutes ago — manual: before parser rewrite): 11 resto
 Every restore snapshots first, so undo is itself undoable.
 
 ## Usage
-
-Two disjoint namespaces, one rule: **`jog git` is the only door to git.**
-Every other verb is jog's own; anything else is an error — jog never
-guesses (`mcp` is reserved for a future release). The wiring and
-maintenance commands (`install`, `shell`, `agents`, `editors`,
-`config`, `doctor`, `update`) are covered in their own sections;
-`jog help <command>` has the full page for everything.
 
 ### jog
 
@@ -340,15 +331,23 @@ objects in each repo, and `jog trim` (or deleting `refs/jog/*`) is how
 they go. The closing line names the right way to remove the binary for
 how it was installed (`rm`, `brew uninstall jog`, …).
 
-## Shell
+## Hooks
+
+jog takes its snapshots from hooks. Three surfaces can carry one — your
+shell, your coding agents, and your editor — each wired by its own
+`jog <surface> install` command and covered below.
+
+### Shell
 
 Your shell can get two independent lines, each serving a different
-purpose: the alias (the standard install) and the preexec hook (opt-in
-— hooking every command is a bigger ask, so it's never wired silently).
-Each is one marked line in the shell's rc file; a version you already
-wired by hand is recognized and left alone.
+purpose: the alias and the preexec hook.
 
-### The alias
+#### The alias
+
+The alias routes every git command you type through `jog git`, which
+snapshots the working tree first and then runs real git, exactly as
+typed. It only affects your interactive shell — scripts, IDEs, and CI
+resolve `git` on PATH and get real git.
 
 ```sh
 # bash / zsh (~/.bashrc / ~/.zshrc)
@@ -363,22 +362,13 @@ alias git 'jog git'
 function git { jog git @args }
 ```
 
-The alias is how you "remember" to snapshot: you don't. Muscle memory is
-the trigger; the compulsive `git status` tic becomes the snapshot
-heartbeat. Every git command you type snapshots first, then runs real
-git, exactly as typed.
+#### The preexec hook
 
-Scripts, IDEs, and CI are untouched — they resolve `git` on PATH and get
-real git. That's a feature: jog stays out of every code path that
-expects exact git behavior.
-
-### The preexec hook
-
-The alias only fires on git commands. The preexec hook covers the rest
-of your terminal: it snapshots before *every* interactive command, so
-`rm -rf`, `sed -i`, and `make clean` have a restore point too. Opt in
-with `jog shell install --preexec`; it's one line calling
-`jog shell-hook` from the shell's before-each-command mechanism:
+The preexec hook covers the rest of your terminal: it snapshots before
+*every* interactive command, so `rm -rf`, `sed -i`, and `make clean`
+have a restore point too. Opt in with `jog shell install --preexec`;
+it's one line calling `jog shell-hook` from the shell's
+before-each-command mechanism:
 
 ```sh
 # bash (~/.bashrc) — via PS0, bash 4.4+ (older bash ignores it harmlessly)
@@ -393,24 +383,7 @@ function __jog_preexec --on-event fish_preexec; type -q jog; and jog shell-hook 
 
 (PowerShell has no preexec mechanism — it gets the alias only.)
 
-The hook is silent and synchronous — the snapshot exists *before* the
-command runs. It skips `jog` commands, exits in milliseconds outside git
-repos, and costs one no-op jog run per command inside them. On a git
-command both lines fire; the second snapshot is a no-op.
-
-```sh
-jog shell install               # the alias, login shell (or name bash, zsh, fish, powershell)
-jog shell install --preexec     # …plus the preexec hook
-jog shell list                  # every supported shell and what is installed
-jog shell uninstall             # removes both lines, wherever install wrote them
-```
-
-`--no-alias` scopes install to the hook alone (`--preexec --no-alias`);
-on uninstall, `--no-alias` / `--no-preexec` spare one surface —
-`jog shell uninstall --no-alias` turns off the before-every-command
-snapshots and keeps the alias.
-
-## Agents
+### Agents
 
 Agents are why jog exists twice over: they're the fastest writers your
 worktree has ever had, and the first to delete something you still needed.
@@ -432,7 +405,7 @@ jog integrates with every supported client at two surfaces:
 | Gemini CLI | `~/.gemini/settings.json` | `~/.gemini/skills/jog/` |
 | OpenCode | plugin at `~/.config/opencode/plugins/jog.js` | `~/.config/opencode/skills/jog/` |
 
-The installed hook:
+Install with `jog agents install` and you'll get:
 
 - snapshots the working tree before every prompt and every mutating
   tool call
@@ -442,21 +415,7 @@ The installed hook:
 - can never block the agent: it always exits 0, and exits in
   milliseconds outside git repos
 
-```sh
-jog agents install     # both surfaces, every client found on this machine
-jog agents list        # every supported client and what's installed
-jog agents uninstall   # removes exactly what install wrote
-```
-
-Everything installs globally, so one wiring covers every repo — pass
-`--project` to scope it to the current repo instead.
-
-> [!NOTE]
-> Install is additive: existing config fields are preserved, malformed
-> JSON is never rewritten, and uninstall refuses to delete a skill file
-> carrying local edits. The install output prints every path it touched.
-
-## Editors
+### Editors
 
 Agents get hooks; so do humans. `jog editors install <editor>` drops a
 post-save hook into your editor, so every save inside a git repo becomes a
@@ -474,27 +433,6 @@ checkpoint (the pre-save state is your editor's own undo).
 | `micro` | `~/.config/micro/plug/jog/jog.lua` | new sessions |
 | `vscode` | `~/.vscode/extensions/` + `~/.vscode-server/extensions/` (whichever exist) | after a full restart (remote windows: reload) |
 | `jetbrains` | `.idea/watcherTasks.xml` — per project | after a project reload; needs the File Watchers plugin |
-
-```sh
-jog editors list             # every supported editor and what's installed
-jog editors install vim      # one editor at a time — each has its own gotchas
-jog editors uninstall vim    # removes exactly what install wrote
-```
-
-install and uninstall take exactly one editor per run — the install output
-is where each editor's how-it-works and caveats are taught. Everything
-installs globally except `jetbrains`, whose hook can only live in a
-project's `.idea` directory: re-run it in each project you want covered.
-
-> [!NOTE]
-> The wired hook (`jog editor-hook <editor>`) always exits 0 and prints
-> nothing — a jog failure can never disturb a save — and it exits in
-> milliseconds outside git repos. Uninstall refuses to delete a hook file
-> carrying local edits. GUI editors get jog's absolute path baked in
-> (desktop launches don't inherit your shell's PATH); re-run install if
-> you move jog. For VS Code Remote-SSH, run the install on the remote
-> machine — its extension host loads from `~/.vscode-server`, and the
-> "Install in SSH" button copies your local machine's jog path.
 
 ## What jog will never touch
 
