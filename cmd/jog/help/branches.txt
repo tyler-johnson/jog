@@ -1,0 +1,18 @@
+jog branches — every branch's snapshot chain
+
+usage:
+  jog branches [--json]
+
+One row per chain: the branch name, how many snapshots the chain
+holds, and the newest snapshot's age and provenance. The first column
+marks the branch: * is the current branch, - is a deleted one. Chains
+outlive their branches — a deleted branch's chain stays listed until
+its snapshots age out of the keep window, and "jog trim --gone" drops
+it right away. Work snapshotted on a detached HEAD appears as
+@detached.
+
+"jog branch" is an alias of branches.
+
+options:
+  --json   machine-readable: branch, live, snapshots, and the newest
+           snapshot's id, sha, time, age, and provenance

@@ -96,23 +96,7 @@ func Trim(args []string) int {
 		chains = append(chains, trimChain{ref, entries, true})
 	}
 
-	// A chain is live while its branch still exists. A live tip is
-	// immortal — the last state of a branch is its whole point — but a
-	// dead chain's tip ages out like the rest, so deleted branches (and
-	// @detached work) eventually vanish whole. If the branch listing
-	// fails, every chain stays live: erring immortal loses nothing.
-	if bout, err := repo.RunRead("for-each-ref", "--format=%(refname:short)", "refs/heads/"); err == nil {
-		branches := map[string]bool{}
-		for _, b := range strings.Split(bout, "\n") {
-			branches[b] = true
-		}
-		if cur, detached := repo.HeadBranch(); !detached {
-			branches[cur] = true // unborn HEAD: the branch is current, just refless
-		}
-		for i := range chains {
-			chains[i].live = branches[strings.TrimPrefix(chains[i].ref, "refs/jog/")]
-		}
-	}
+	markLive(repo, chains)
 
 	// Trash whose chain is gone insures nothing — the chain aged out (or
 	// was removed) on an earlier run, and its one-cycle grace ends now.
@@ -233,6 +217,28 @@ type trimChain struct {
 	ref     string
 	entries []chainEntry
 	live    bool
+}
+
+// markLive marks each chain live while its branch still exists. A live
+// tip is immortal — the last state of a branch is its whole point — but a
+// dead chain's tip ages out like the rest, so deleted branches (and
+// @detached work) eventually vanish whole. If the branch listing
+// fails, every chain stays live: erring immortal loses nothing.
+func markLive(repo *gitx.Repo, chains []trimChain) {
+	bout, err := repo.RunRead("for-each-ref", "--format=%(refname:short)", "refs/heads/")
+	if err != nil {
+		return
+	}
+	branches := map[string]bool{}
+	for _, b := range strings.Split(bout, "\n") {
+		branches[b] = true
+	}
+	if cur, detached := repo.HeadBranch(); !detached {
+		branches[cur] = true // unborn HEAD: the branch is current, just refless
+	}
+	for i := range chains {
+		chains[i].live = branches[strings.TrimPrefix(chains[i].ref, "refs/jog/")]
+	}
 }
 
 // survivorTrees collects the tree shas planTrim would keep at the given

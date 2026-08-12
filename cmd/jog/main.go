@@ -82,7 +82,7 @@ func wantsHelp(args []string) bool {
 // (`jog help snaps`, `jog help agent list`).
 var helpAlias = map[string]string{
 	"agent": "agents", "editor": "editors",
-	"snaps": "log", "pick": "log", "back": "restore",
+	"snaps": "log", "pick": "log", "back": "restore", "branch": "branches",
 }
 
 // resolveHelp finds the most specific help page for a word path:
@@ -147,6 +147,8 @@ func run(args []string) int {
 		return cli.Since(args[1:])
 	case "restore", "back":
 		return cli.Restore(args[0], args[1:])
+	case "branches", "branch":
+		return cli.Branches(args[0], args[1:])
 	case "hook":
 		// Pure runtime entries (`jog hook <client>`, JSON on stdin) are the
 		// exact commands `jog agents install` wires into settings, so they

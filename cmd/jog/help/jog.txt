@@ -9,6 +9,7 @@ commands:
   log        browse the timeline of snapshots on this branch
   since      what changed since a snapshot
   restore    restore files — or the whole tree — from a snapshot
+  branches   every branch's snapshot chain — count, newest, live or gone
   git        snapshot, then run the real git command (what the alias runs)
   install    guided setup: the shell alias, agent hooks, editor hooks
   uninstall  remove jog's wiring

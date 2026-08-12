@@ -847,6 +847,117 @@ func runJogEnvStdin(t *testing.T, dir string, extraEnv []string, stdin string, a
 	return so.String(), se.String(), code
 }
 
+// TestBranches covers the per-chain summary: one row per chain with the
+// current branch starred, counts and newest provenance, deleted branches
+// marked - in the gutter with the trim --gone footer, `branch` as a
+// byte-identical alias, the command's own boundary snapshot, and the
+// --json shape.
+func TestBranches(t *testing.T) {
+	tr := testrepo.New(t)
+	tr.Write("a.txt", "one\n")
+	tr.Commit("base")
+	runJog(t, tr.Dir, "-m", "wip on main")
+	tr.Git("checkout", "-q", "-b", "feature")
+	tr.Write("b.txt", "feat\n")
+	runJog(t, tr.Dir, "-m", "wip on feature")
+	tr.Git("checkout", "-q", "main")
+	tr.Git("branch", "-D", "feature")
+
+	// The run's own boundary snapshot lands first (b.txt is untracked
+	// relative to main's last snapshot), so main reads 2 snapshots with
+	// the pre: provenance on top.
+	stdout, stderr, code := runJog(t, tr.Dir, "branches")
+	if code != 0 {
+		t.Fatalf("branches exited %d: %s", code, stderr)
+	}
+	lines := strings.Split(strings.TrimRight(stdout, "\n"), "\n")
+	if len(lines) != 3 {
+		t.Fatalf("want 2 rows + footer, got:\n%s", stdout)
+	}
+	if !strings.HasPrefix(lines[0], "* main") ||
+		!strings.Contains(lines[0], "2 snapshots") ||
+		!strings.Contains(lines[0], "pre: jog branches") {
+		t.Errorf("main row: %q", lines[0])
+	}
+	if !strings.HasPrefix(lines[1], "- feature") ||
+		!strings.Contains(lines[1], "1 snapshot,") ||
+		!strings.Contains(lines[1], "manual: wip on feature") {
+		t.Errorf("feature row: %q", lines[1])
+	}
+	if lines[2] != "- Deleted branch, clean up with jog trim --gone" {
+		t.Errorf("footer: %q", lines[2])
+	}
+	if strings.Contains(stdout, "\x1b[") {
+		t.Errorf("piped output carries ANSI escapes:\n%s", stdout)
+	}
+	if got := tr.Git("log", "-1", "--format=%s", "refs/jog/main"); got != "pre: jog branches" {
+		t.Errorf("self-snapshot provenance = %q", got)
+	}
+
+	// The alias no-ops its own snapshot (the tree is now clean), so the
+	// listing is byte-identical.
+	alias, _, code := runJog(t, tr.Dir, "branch")
+	if code != 0 || alias != stdout {
+		t.Errorf("branch output differs from branches (code=%d):\n%s", code, alias)
+	}
+
+	stdout, stderr, code = runJog(t, tr.Dir, "branches", "--json")
+	if code != 0 {
+		t.Fatalf("branches --json exited %d: %s", code, stderr)
+	}
+	var rows []struct {
+		Branch    string `json:"branch"`
+		Live      bool   `json:"live"`
+		Snapshots int    `json:"snapshots"`
+		Newest    struct {
+			ID         string `json:"id"`
+			SHA        string `json:"sha"`
+			Time       string `json:"time"`
+			Age        string `json:"age"`
+			Provenance string `json:"provenance"`
+		} `json:"newest"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &rows); err != nil {
+		t.Fatalf("--json not parseable: %v\n%s", err, stdout)
+	}
+	if len(rows) != 2 || rows[0].Branch != "main" || rows[1].Branch != "feature" {
+		t.Fatalf("--json rows: %+v", rows)
+	}
+	if !rows[0].Live || rows[0].Snapshots != 2 ||
+		rows[0].Newest.ID != rows[0].Newest.SHA[:7] ||
+		rows[0].Newest.Provenance != "pre: jog branches" {
+		t.Errorf("main json row: %+v", rows[0])
+	}
+	if _, err := time.Parse(time.RFC3339, rows[0].Newest.Time); err != nil {
+		t.Errorf("newest.time not RFC3339: %v", err)
+	}
+	if rows[1].Live || rows[1].Snapshots != 1 ||
+		rows[1].Newest.Provenance != "manual: wip on feature" {
+		t.Errorf("feature json row: %+v", rows[1])
+	}
+
+	_, stderr, code = runJog(t, tr.Dir, "branches", "--bogus")
+	if code != 2 || !strings.Contains(stderr, "usage: jog branches [--json]") {
+		t.Errorf("unknown flag: code=%d stderr=%q", code, stderr)
+	}
+
+	// The no-chains state needs a repo whose boundary snapshot cannot mint
+	// a chain — in any worktree the command's own snapshot seeds one — so
+	// a bare repo stands in (same silent-snapshot-failure path as jog log).
+	bare := t.TempDir()
+	if out, err := exec.Command("git", "init", "-q", "--bare", bare).CombinedOutput(); err != nil {
+		t.Fatalf("git init --bare: %v\n%s", err, out)
+	}
+	stdout, _, code = runJog(t, bare, "branches")
+	if code != 0 || !strings.Contains(stdout, "no snapshot chains") {
+		t.Errorf("empty state: code=%d stdout=%q", code, stdout)
+	}
+	stdout, _, code = runJog(t, bare, "branches", "--json")
+	if code != 0 || strings.TrimSpace(stdout) != "[]" {
+		t.Errorf("empty state --json: code=%d stdout=%q", code, stdout)
+	}
+}
+
 // TestDoctor covers matrix row 30: healthy exits 0; a dead chain, missing
 // gc keys, and a foreign chain tip are each findings (exit 1); --fix writes
 // only the two gc keys.
@@ -1455,7 +1566,7 @@ func mustHelp(t *testing.T, dir string, words ...string) string {
 // --help) belongs to real git. (TestHelp covers the global forms.)
 func TestPerCommandHelp(t *testing.T) {
 	dir := t.TempDir() // outside any repo: help must not need one
-	verbs := []string{"log", "snaps", "pick", "since", "restore", "back", "trim", "config", "doctor", "hook", "agents", "agent", "editors", "editor", "editor-hook", "shell-hook", "update", "shell", "install", "uninstall"}
+	verbs := []string{"log", "snaps", "pick", "since", "restore", "back", "branches", "branch", "trim", "config", "doctor", "hook", "agents", "agent", "editors", "editor", "editor-hook", "shell-hook", "update", "shell", "install", "uninstall"}
 	for _, v := range verbs {
 		stdout, _, code := runJog(t, dir, v, "--help")
 		if code != 0 || !strings.Contains(stdout, "usage:") || !strings.Contains(stdout, v) {
